@@ -22,6 +22,14 @@ object Library {
             .sortedByDescending { it.lastModified() }
             .toList()
 
+    /**
+     * Every clip is also in the Gallery, so the app keeps only the newest [keep] copies for its own list.
+     * Without this, the app's private folder grows by ~50 MB per clip forever.
+     */
+    fun prune(context: Context, keep: Int = 15) {
+        recent(context).drop(keep).forEach { delete(it) }
+    }
+
     fun delete(file: File) {
         file.delete()
         file.parentFile?.takeIf { it.listFiles().isNullOrEmpty() }?.delete()

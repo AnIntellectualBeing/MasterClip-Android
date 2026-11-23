@@ -29,6 +29,21 @@ object Remux {
         f.setByteBuffer("csd-1", ByteBuffer.wrap(bytes.copyOfRange(starts[1], bytes.size)))
     }
 
+    /**
+     * A live recording keeps the stream's own clock (Twitch: hours since the stream began), so players and the
+     * renderer think it is hours long. Rewrites it to start at 0, no re-encode.
+     */
+    fun rebase(file: File, out: File): String = merge(file, 0.0, file, 0.0, out)
+
+    private const val JUMP_US = 1_000_000L
+
+    /** Per-track timeline state for closing up jumps. [step] = the last normal gap between samples. */
+    private class Smooth(var step: Long) {
+        var lastIn = Long.MIN_VALUE
+        var lastOut = 0L
+        var shift = 0L
+    }
+
     fun merge(video: File, videoStartSec: Double, audio: File?, audioStartSec: Double, out: File): String {
         var vCount = 0
         var aCount = 0
@@ -63,7 +78,9 @@ object Remux {
             val vBase = vEx.sampleTime.coerceAtLeast(0)
             val aBase = if (aOut >= 0) aEx!!.sampleTime.coerceAtLeast(0) else 0L
             // Where the sound's time 0 sits on the picture's clock (microseconds).
-            val aShift = ((audioStartSec - videoStartSec) * 1_000_000).toLong() - aBase
+            // Same file for both: keep the file's own picture/sound sync and just move everything to start at 0.
+            val aShift = if (audio != null && audio.absolutePath == video.absolutePath) -vBase
+                else ((audioStartSec - videoStartSec) * 1_000_000).toLong() - aBase
             // Long.MAX_VALUE = no sound left, so the picture always goes first.
             fun audioTime(): Long = if (aOut >= 0) aEx!!.sampleTime.let { if (it < 0) Long.MAX_VALUE else it + aShift } else Long.MAX_VALUE
             val buf = ByteBuffer.allocateDirect(6 shl 20)
@@ -79,14 +96,32 @@ object Remux {
                 ex.advance()
             }
 
+            // Live recordings can jump in time (Twitch ad breaks, clock resets). When rebasing one file, a jump of
+            // more than a second is closed up so the clip timeline stays continuous. B-frame reordering is smaller.
+            val fixJumps = audio != null && audio.absolutePath == video.absolutePath
+            val vT = Smooth(33_333)
+            val aT = Smooth(21_333)
+            fun outTime(t: Smooth, raw: Long): Long {
+                if (!fixJumps || t.lastIn == Long.MIN_VALUE) return raw + t.shift
+                val d = raw - t.lastIn
+                return if (d < -JUMP_US || d > JUMP_US) t.lastOut + t.step else raw + t.shift
+            }
+            fun commit(t: Smooth, raw: Long, out: Long) {
+                if (t.lastIn != Long.MIN_VALUE) { val d = raw - t.lastIn; if (d in 1..JUMP_US) t.step = d }
+                t.shift = out - raw; t.lastIn = raw; t.lastOut = out
+            }
+
             // Interleave by time so the mp4 plays and seeks smoothly.
             while (true) {
                 val vt = vEx.sampleTime
                 if (vt < 0) break // the picture ended; sound past it is dropped
-                val vPts = vt - vBase
-                var at = audioTime()
-                while (aOut >= 0 && at < 0) { aEx!!.advance(); at = audioTime() } // sound before the first picture
-                if (vPts <= at) { write(vEx, vOut, vPts); vCount++ } else { write(aEx!!, aOut, at); aCount++ }
+                val vRaw = vt - vBase
+                val vPts = outTime(vT, vRaw)
+                var aRaw = audioTime()
+                while (aOut >= 0 && aRaw != Long.MAX_VALUE && aRaw < 0 && (!fixJumps || aT.lastIn == Long.MIN_VALUE)) { aEx!!.advance(); aRaw = audioTime() } // sound before the first picture
+                val at = if (aRaw == Long.MAX_VALUE) Long.MAX_VALUE else outTime(aT, aRaw)
+                if (vPts <= at) { write(vEx, vOut, vPts); commit(vT, vRaw, vPts); vCount++ }
+                else { write(aEx!!, aOut, at.coerceAtLeast(0)); commit(aT, aRaw, at); aCount++ }
             }
             return "$vCount picture and $aCount sound samples"
         } catch (e: FriendlyError) {

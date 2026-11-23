@@ -189,6 +189,7 @@ object ClipEngine {
 
     private fun clipsDir(context: Context): File {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        runCatching { Library.prune(context) }
         return File(context.filesDir, "clips/$stamp").apply { mkdirs() }
     }
 
@@ -605,7 +606,19 @@ object ClipEngine {
                     v.delete(); a.delete()
                 }
             }
-            made ?: io { Ytdl.live(url, work, "live", seconds, section) }
+            made ?: io {
+                val raw = Ytdl.live(url, work, "live", seconds, section)
+                val fixed = File(work, "live_fixed.mp4")
+                try {
+                    Log.i(TAG, "live rebase: ${Remux.rebase(raw, fixed)}")
+                    raw.delete()
+                    fixed
+                } catch (e: Exception) {
+                    Log.w(TAG, "live rebase failed; using the recording as it is", e)
+                    fixed.delete()
+                    raw
+                }
+            }
         } finally {
             ticker.cancel()
         }

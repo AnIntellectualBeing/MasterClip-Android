@@ -74,7 +74,7 @@ object LayoutPlanner {
      * Picks the layout. The owner's rule: a face-cam layout must always keep the face in view;
      * with no face, the whole video goes in the middle.
      */
-    fun plan(srcW: Int, srcH: Int, samples: List<FaceSample>, choice: LayoutChoice): LayoutPlan {
+    fun plan(srcW: Int, srcH: Int, samples: List<FaceSample>, choice: LayoutChoice, edges: EdgeMap? = null): LayoutPlan {
         val srcAspect = srcW.toFloat() / srcH
         if (srcAspect <= OUT_ASPECT * 1.08f) {
             // Already vertical: fill, cropping the little that is left.
@@ -93,7 +93,7 @@ object LayoutPlanner {
         // Several people on screen is a podcast/vlog shot, not a streamer cam.
         val multi = withFace.count { spread(it.faces) > 0f } * 2 >= withFace.size
         val wantStack = choice == LayoutChoice.FACECAM || (choice == LayoutChoice.AUTO && small && offCenter && !multi)
-        if (wantStack) return stack(srcW, srcH, face)
+        if (wantStack) return stack(srcW, srcH, face, edges)
 
         // Follow the face. Two people too far apart for one crop -> show everything instead.
         val cropW = (srcH * OUT_ASPECT) / srcW
@@ -103,7 +103,7 @@ object LayoutPlanner {
         return follow(srcW, srcH, withFace, cropW)
     }
 
-    private fun stack(srcW: Int, srcH: Int, face: Box): LayoutPlan {
+    private fun stack(srcW: Int, srcH: Int, face: Box, edges: EdgeMap? = null): LayoutPlan {
         // Top band (1080 x 768) shows the cam, bottom band (1080 x 1152) the middle of the game.
         val topAspect = LayoutPlan.OUT_W / (LayoutPlan.OUT_H * STACK_SPLIT)
         val bottomAspect = LayoutPlan.OUT_W / (LayoutPlan.OUT_H * (1 - STACK_SPLIT))
@@ -114,8 +114,20 @@ object LayoutPlanner {
         if (camHPx > srcH) { camHPx = srcH.toFloat(); camWPx = camHPx * topAspect }
         val cxPx = face.cx * srcW
         val cyPx = face.cy * srcH + camHPx * 0.08f // face a little above the middle of the cam band
-        val x = (cxPx - camWPx / 2).coerceIn(0f, srcW - camWPx)
-        val y = (cyPx - camHPx / 2).coerceIn(0f, srcH - camHPx)
+        // Keep the crop inside the cam panel's own border, so no strip of game or overlay shows at its edge.
+        val panel = edges?.let { PanelRefine.refine(it, face) }
+        var minX = 0f
+        var minY = 0f
+        var maxX = srcW.toFloat()
+        var maxY = srcH.toFloat()
+        if (panel != null) {
+            minX = panel.x * srcW; minY = panel.y * srcH
+            maxX = (panel.x + panel.w) * srcW; maxY = (panel.y + panel.h) * srcH
+            val s = min(1f, min((maxX - minX) / camWPx, (maxY - minY) / camHPx))
+            camWPx *= s; camHPx *= s
+        }
+        val x = (cxPx - camWPx / 2).coerceIn(minX, max(minX, maxX - camWPx))
+        val y = (cyPx - camHPx / 2).coerceIn(minY, max(minY, maxY - camHPx))
         val cam = Box(x / srcW, y / srcH, camWPx / srcW, camHPx / srcH)
         val game = centerCrop(srcW, srcH, bottomAspect)
         return LayoutPlan(LayoutMode.STACK, top = cam, bottom = listOf(Key(0, game)), split = STACK_SPLIT)

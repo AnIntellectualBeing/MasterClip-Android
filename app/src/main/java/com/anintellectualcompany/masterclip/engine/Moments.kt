@@ -49,12 +49,28 @@ object Moments {
         length: Double,
         rangeStart: Double? = null,
         rangeEnd: Double? = null,
-    ): List<Moment> {
-        if (rms.isEmpty()) return emptyList()
-        val mean = rms.average()
+    ): List<Moment> = pick(loudnessScore(rms), count, length, rangeStart, rangeEnd)
+
+    /** Mean and standard deviation. */
+    fun stats(v: FloatArray): Pair<Double, Double> {
+        if (v.isEmpty()) return 0.0 to 0.0
+        val mean = v.average()
         var variance = 0.0
-        for (v in rms) variance += (v - mean) * (v - mean)
-        val sd = sqrt(variance / rms.size).takeIf { it > 1e-9 } ?: 1.0
+        for (x in v) variance += (x - mean) * (x - mean)
+        return mean to sqrt(variance / v.size)
+    }
+
+    /** True when the cheap frame-size signal actually moves (a constant bit rate has nothing to tell). */
+    fun hasVariation(v: FloatArray): Boolean {
+        val (m, sd) = stats(v)
+        return v.size >= 30 && m > 0 && sd / m > 0.08
+    }
+
+    /** Per-second "something happens" score from loudness. */
+    fun loudnessScore(rms: FloatArray, meanOverride: Double? = null, sdOverride: Double? = null): DoubleArray {
+        if (rms.isEmpty()) return DoubleArray(0)
+        val mean = meanOverride ?: rms.average()
+        val sd = (sdOverride ?: stats(rms).second).takeIf { it > 1e-9 } ?: 1.0
         val score = DoubleArray(rms.size)
         for (i in rms.indices) {
             val z = (rms[i] - mean) / sd
@@ -64,7 +80,90 @@ object Moments {
             val jump = if (n > 0) max(0.0, (rms[i] - before / n) / sd) else 0.0
             score[i] = max(0.0, z) + 0.6 * jump
         }
-        return pick(score, count, length, rangeStart, rangeEnd)
+        return score
+    }
+
+    /**
+     * Long video, no heatmap: which pieces to listen to. Short enough -> all of [a]..[b];
+     * otherwise [sliceSec]-long slices spread evenly, adding up to about [capSec].
+     */
+    fun scanSlices(a: Double, b: Double, capSec: Double, sliceSec: Double = 300.0): List<Pair<Double, Double>> {
+        val span = b - a
+        if (span <= 0) return emptyList()
+        if (span <= capSec * 1.1) return listOf(a to b)
+        val n = max(2, (capSec / sliceSec).toInt())
+        val step = span / n
+        return (0 until n).map { i ->
+            val s = a + step * i + (step - sliceSec) / 2
+            s to (s + sliceSec)
+        }
+    }
+
+    /**
+     * Short stretches ([burst] seconds each) spread evenly over [a]..[b], adding up to about [budget]
+     * seconds. A video that fits in the budget is listened to whole.
+     */
+    fun bursts(a: Double, b: Double, burst: Double, budget: Double): List<Pair<Double, Double>> {
+        val span = b - a
+        if (span <= 0) return emptyList()
+        if (span <= budget || span <= burst * 2) return listOf(a to b)
+        val n = min(max(1, (budget / burst).toInt()), max(1, (span / burst).toInt()))
+        val step = span / n
+        return (0 until n).map { i ->
+            val s = a + step * i + (step - burst) / 2
+            s to (s + burst)
+        }
+    }
+
+    /** Puts the loudness score of each scanned slice at its place in a whole-video score (the rest stays 0). */
+    fun placeSlices(total: Int, parts: List<Pair<Double, DoubleArray>>): DoubleArray {
+        val out = DoubleArray(total)
+        for ((start, score) in parts) {
+            val s0 = start.roundToInt()
+            for (i in score.indices) {
+                val at = s0 + i
+                if (at in 0 until total) out[at] = score[i]
+            }
+        }
+        return out
+    }
+
+    /** One look at the chat: how many messages per second around [time] (seconds in the video). */
+    data class RatePoint(val time: Double, val rate: Double)
+
+    /**
+     * Chat speed samples -> per-second score. Chat reacts a few seconds after the event,
+     * so the score is shifted [lag] seconds earlier. Between samples the speed is interpolated.
+     */
+    fun rateScore(points: List<RatePoint>, total: Int, lag: Int = 6): DoubleArray {
+        val out = DoubleArray(total)
+        val p = points.sortedBy { it.time }
+        if (p.isEmpty() || total <= 0) return out
+        var j = 0
+        for (s in 0 until total) {
+            val t = (s + lag).toDouble()
+            while (j + 1 < p.size && p[j + 1].time <= t) j++
+            out[s] = when {
+                t <= p.first().time -> p.first().rate
+                t >= p.last().time -> p.last().rate
+                else -> {
+                    val a = p[j]
+                    val b = p[j + 1]
+                    val f = if (b.time > a.time) (t - a.time) / (b.time - a.time) else 0.0
+                    a.rate + (b.rate - a.rate) * f
+                }
+            }
+        }
+        return out
+    }
+
+    /** Message times of one chat page -> a rate point (null when the page is too thin to say anything). */
+    fun ratePointOf(times: List<Double>): RatePoint? {
+        if (times.size < 3) return null
+        val a = times.min()
+        val b = times.max()
+        val span = max(3.0, b - a)
+        return RatePoint((a + b) / 2, times.size / span)
     }
 
     /** No data at all: spread the clips evenly. */

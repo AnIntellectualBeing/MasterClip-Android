@@ -65,7 +65,16 @@ object MediaTools {
      * Looks for faces in a few frames between [fromMs] and [toMs]. Times in the result are
      * relative to [fromMs], which is how the layout effect counts time.
      */
-    suspend fun faces(context: Context, uri: Uri, fromMs: Long, toMs: Long, samples: Int = 8): List<FaceSample> {
+    suspend fun faces(context: Context, uri: Uri, fromMs: Long, toMs: Long, samples: Int = 8): List<FaceSample> =
+        scan(context, uri, fromMs, toMs, samples).faces
+
+    /** Faces per sampled frame, and the edge map of those frames (to find the face-cam panel's border). */
+    class Scan(val faces: List<FaceSample>, val edges: EdgeMap?)
+
+    suspend fun scan(context: Context, uri: Uri, fromMs: Long, toMs: Long, samples: Int = 8): Scan {
+        val edgeMaps = ArrayList<ByteArray>()
+        var ew = 0
+        var eh = 0
         val detector = FaceDetection.getClient(
             FaceDetectorOptions.Builder()
                 .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
@@ -88,6 +97,16 @@ object MediaTools {
                     val found = Tasks.await(detector.process(InputImage.fromBitmap(frame, 0)))
                     val w = frame.width.toFloat()
                     val h = frame.height.toFloat()
+                    if (edgeMaps.isEmpty() || (frame.width == ew && frame.height == eh)) {
+                        ew = frame.width; eh = frame.height
+                        val px = IntArray(ew * eh)
+                        frame.getPixels(px, 0, ew, 0, 0, ew, eh)
+                        for (k in px.indices) {
+                            val c = px[k]
+                            px[k] = (((c shr 16) and 255) * 77 + ((c shr 8) and 255) * 150 + (c and 255) * 29) shr 8
+                        }
+                        edgeMaps += PanelRefine.edgesOf(px, ew, eh)
+                    }
                     out += FaceSample((rel * 1000).toLong(), found.map {
                         val b = it.boundingBox
                         Box(b.left / w, b.top / h, b.width() / w, b.height() / h)
@@ -104,77 +123,109 @@ object MediaTools {
             runCatching { r.release() }
             detector.close()
         }
-        return out
+        return Scan(out, PanelRefine.mean(edgeMaps, ew, eh))
     }
 
-    /** Loudness (RMS) for every second of the sound track. */
-    suspend fun loudness(context: Context, uri: Uri, onProgress: (Float) -> Unit): FloatArray {
+    /** Loudness (RMS) for every second of the sound track (or of [fromSec]..[toSec] of it). */
+    suspend fun loudness(context: Context, uri: Uri, onProgress: (Float) -> Unit, fromSec: Double = 0.0, toSec: Double? = null): FloatArray =
+        loudnessRanges(context, uri, listOf(fromSec to (toSec ?: Double.MAX_VALUE)), onProgress).firstOrNull() ?: FloatArray(0)
+
+    /**
+     * Loudness (RMS per second) of several stretches of the sound, given as seconds from the start of the file,
+     * in time order. The file is read once from the top: parts between the stretches are skipped without
+     * decoding (decoding is the slow part: roughly 20x real time on a phone), so sampling a few seconds
+     * out of every minute is cheap. Seconds count from the start of each stretch.
+     */
+    suspend fun loudnessRanges(context: Context, uri: Uri, ranges: List<Pair<Double, Double>>, onProgress: (Float) -> Unit = {}): List<FloatArray> {
         val ex = MediaExtractor()
         var codec: MediaCodec? = null
+        val result = ArrayList<FloatArray>()
         try {
             ex.setDataSource(context, uri, null)
             val track = (0 until ex.trackCount).firstOrNull {
                 ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
-            } ?: return FloatArray(0)
+            } ?: return emptyList()
             ex.selectTrack(track)
             val format = ex.getTrackFormat(track)
-            val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
             val c = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
             codec = c
             c.configure(format, null, null, 0)
             c.start()
             var rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            val perSecond = ArrayList<Float>()
-            var sum = 0.0
-            var n = 0L
-            var inputDone = false
+            val base = ex.sampleTime.coerceAtLeast(0) // the file may count from 0 or from where the piece was cut
             val info = MediaCodec.BufferInfo()
-            var tick = 0
-            while (true) {
-                if (++tick % 200 == 0) coroutineContext.ensureActive()
-                if (!inputDone) {
-                    val inIdx = c.dequeueInputBuffer(5000)
-                    if (inIdx >= 0) {
-                        val buf = c.getInputBuffer(inIdx)!!
-                        val size = ex.readSampleData(buf, 0)
+            var pcm = ShortArray(65536)
+            var ticks = 0
+            for ((ri, r) in ranges.withIndex()) {
+                coroutineContext.ensureActive()
+                val fromUs = (r.first * 1_000_000).toLong()
+                val toUs = if (r.second >= Double.MAX_VALUE / 2) Long.MAX_VALUE else (r.second * 1_000_000).toLong()
+                // Skip, without decoding, up to the start of this stretch.
+                while (ex.sampleTime >= 0 && ex.sampleTime - base < fromUs) ex.advance()
+                if (ex.sampleTime < 0) break
+                val perSecond = ArrayList<Float>()
+                var sum = 0.0
+                var n = 0L
+                var inputDone = false
+                var ended = false
+                while (!ended) {
+                    if (++ticks % 100 == 0) coroutineContext.ensureActive()
+                    var progressed = false
+                    while (!inputDone) {
+                        val inIdx = c.dequeueInputBuffer(0)
+                        if (inIdx < 0) break
+                        val t = ex.sampleTime
+                        val size = if (t < 0 || t - base > toUs) -1 else ex.readSampleData(c.getInputBuffer(inIdx)!!, 0)
                         if (size < 0) {
                             c.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             inputDone = true
                         } else {
-                            c.queueInputBuffer(inIdx, 0, size, ex.sampleTime, 0)
-                            if (durationUs > 0 && tick % 50 == 0) onProgress((ex.sampleTime.toFloat() / durationUs).coerceIn(0f, 1f))
+                            c.queueInputBuffer(inIdx, 0, size, t, 0)
+                            if (ranges.size == 1 && ticks % 10 == 0 && toUs != Long.MAX_VALUE) onProgress(((t - base - fromUs).toFloat() / (toUs - fromUs)).coerceIn(0f, 1f))
                             ex.advance()
                         }
+                        progressed = true
+                    }
+                    while (true) {
+                        val outIdx = c.dequeueOutputBuffer(info, if (progressed) 0 else 3000)
+                        if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                            rate = c.outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                            channels = c.outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                            progressed = true
+                        } else if (outIdx >= 0) {
+                            progressed = true
+                            val shorts = c.getOutputBuffer(outIdx)!!.order(java.nio.ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+                            val perSec = rate.toLong() * channels
+                            val count = shorts.remaining()
+                            if (pcm.size < count) pcm = ShortArray(count)
+                            shorts.get(pcm, 0, count)
+                            for (k in 0 until count) {
+                                val v = pcm[k] / 32768.0
+                                sum += v * v
+                                if (++n >= perSec) {
+                                    perSecond += sqrt(sum / n).toFloat()
+                                    sum = 0.0; n = 0
+                                }
+                            }
+                            c.releaseOutputBuffer(outIdx, false)
+                            if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) { ended = true; break }
+                        } else break
                     }
                 }
-                val outIdx = c.dequeueOutputBuffer(info, 5000)
-                if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    rate = c.outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                    channels = c.outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                } else if (outIdx >= 0) {
-                    val buf = c.getOutputBuffer(outIdx)!!.order(java.nio.ByteOrder.LITTLE_ENDIAN)
-                    val shorts = buf.asShortBuffer()
-                    val perSec = rate.toLong() * channels
-                    while (shorts.hasRemaining()) {
-                        val v = shorts.get() / 32768.0
-                        sum += v * v
-                        if (++n >= perSec) {
-                            perSecond += sqrt(sum / n).toFloat()
-                            sum = 0.0; n = 0
-                        }
-                    }
-                    c.releaseOutputBuffer(outIdx, false)
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                if (n > 0) perSecond += sqrt(sum / n).toFloat()
+                result += perSecond.toFloatArray()
+                if (ri < ranges.size - 1) {
+                    c.flush()
+                    c.start()
                 }
             }
-            if (n > 0) perSecond += sqrt(sum / n).toFloat()
-            return perSecond.toFloatArray()
+            return result
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "loudness failed", e)
-            return FloatArray(0)
+            return result
         } finally {
             runCatching { codec?.stop() }
             runCatching { codec?.release() }

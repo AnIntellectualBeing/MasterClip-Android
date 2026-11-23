@@ -90,6 +90,25 @@ class FastEngineTest {
         assertNull(LiveMath.lastPart(50.0, 10))
     }
 
+    @Test fun hlsPiecesAreNumberedAndTheLastOnesPicked() {
+        val sb = StringBuilder("#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:100\n")
+        for (i in 0 until 60) sb.append("#EXTINF:5.0,\nhttps://x/seg$i.ts\n")
+        val segs = Hls.parse(sb.toString(), "https://m/index.m3u8")
+        assertEquals(60, segs.size)
+        assertEquals(100L, segs[0].seq)
+        assertEquals(159L, segs.last().seq)
+        // last 60 s, 12 s margin: drops the newest 2 pieces (10 s), takes 12 before them
+        val last = Hls.lastPieces(segs, 60.0)
+        assertEquals(12, last.size)
+        assertEquals(157L, last.last().seq)
+        assertEquals(146L, last.first().seq)
+        // a short list gives what exists
+        assertTrue(Hls.lastPieces(segs.take(5), 600.0).isNotEmpty())
+        assertEquals(emptyList<Hls.Seg>(), Hls.parse("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv.m3u8\n", "https://m/"))
+        // relative addresses are resolved against the playlist's own
+        assertEquals("https://m/a/s1.ts", Hls.parse("#EXTINF:5.0,\ns1.ts\n", "https://m/a/index.m3u8")[0].url)
+    }
+
     @Test fun liveSizesAndClock() {
         assertTrue(LiveMath.expectedBytes(2000.0, 60.0) in 15_000_000L..17_000_000L)
         assertEquals("3:05", LiveMath.clock(185))

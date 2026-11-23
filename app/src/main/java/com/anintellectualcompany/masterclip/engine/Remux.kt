@@ -15,7 +15,23 @@ import java.nio.ByteBuffer
  * caller tells us which second of the original video each piece starts at, and we line them up from that.
  */
 object Remux {
-    fun merge(video: File, videoStartSec: Double, audio: File?, audioStartSec: Double, out: File) {
+    /** A transport stream hands over SPS and PPS in one csd-0 buffer; the mp4 writer wants them as csd-0 and csd-1. */
+    private fun splitParameterSets(f: MediaFormat) {
+        if (f.containsKey("csd-1") || !f.containsKey("csd-0")) return
+        val b = f.getByteBuffer("csd-0") ?: return
+        val bytes = ByteArray(b.remaining()).also { b.duplicate().get(it) }
+        val starts = ArrayList<Int>()
+        for (i in 0..bytes.size - 4) {
+            if (bytes[i] == 0.toByte() && bytes[i + 1] == 0.toByte() && bytes[i + 2] == 0.toByte() && bytes[i + 3] == 1.toByte()) starts += i
+        }
+        if (starts.size < 2) return
+        f.setByteBuffer("csd-0", ByteBuffer.wrap(bytes.copyOfRange(starts[0], starts[1])))
+        f.setByteBuffer("csd-1", ByteBuffer.wrap(bytes.copyOfRange(starts[1], bytes.size)))
+    }
+
+    fun merge(video: File, videoStartSec: Double, audio: File?, audioStartSec: Double, out: File): String {
+        var vCount = 0
+        var aCount = 0
         out.delete()
         val vEx = MediaExtractor()
         val aEx = if (audio != null) MediaExtractor() else null
@@ -26,8 +42,11 @@ object Remux {
             val vTrack = (0 until vEx.trackCount).firstOrNull { vEx.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }
                 ?: throw FriendlyError("A downloaded part has no picture. Try again.")
             vEx.selectTrack(vTrack)
+            vEx.sampleTime // reading the first piece lets a transport stream fill in its codec details
+            val vFormat = vEx.getTrackFormat(vTrack)
+            splitParameterSets(vFormat)
             muxer = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            val vOut = muxer.addTrack(vEx.getTrackFormat(vTrack))
+            val vOut = muxer.addTrack(vFormat)
 
             var aOut = -1
             if (aEx != null && audio != null) {
@@ -67,8 +86,9 @@ object Remux {
                 val vPts = vt - vBase
                 var at = audioTime()
                 while (aOut >= 0 && at < 0) { aEx!!.advance(); at = audioTime() } // sound before the first picture
-                if (vPts <= at) write(vEx, vOut, vPts) else write(aEx!!, aOut, at)
+                if (vPts <= at) { write(vEx, vOut, vPts); vCount++ } else { write(aEx!!, aOut, at); aCount++ }
             }
+            return "$vCount picture and $aCount sound samples"
         } catch (e: FriendlyError) {
             throw e
         } catch (e: Exception) {

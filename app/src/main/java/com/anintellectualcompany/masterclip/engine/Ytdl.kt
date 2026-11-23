@@ -24,6 +24,8 @@ data class VideoMeta(
     val extractor: String,
     /** HLS playlist of a <=720p video format; only filled for live streams. */
     val liveManifest: String? = null,
+    /** HLS playlist of the sound of the same live stream. */
+    val liveAudioManifest: String? = null,
     /** Bit rate (kbit/s) of the video format chosen for live recording; used to guess the file size. */
     val liveKbps: Double = 0.0,
 )
@@ -236,6 +238,7 @@ object Ytdl {
         val live = json.optBoolean("is_live", false)
         var manifest: String? = null
         var kbps = 0.0
+        var audioManifest: String? = null
         if (live) {
             json.optJSONArray("formats")?.let { arr ->
                 var bestH = -1
@@ -250,6 +253,14 @@ object Ytdl {
                         kbps = f.optDouble("tbr", 0.0).takeIf { !it.isNaN() } ?: 0.0
                     }
                 }
+                var bestA = -1.0
+                for (i in 0 until arr.length()) {
+                    val f = arr.optJSONObject(i) ?: continue
+                    if (f.optString("vcodec", "none") != "none" || f.optString("acodec", "") == "none") continue
+                    if (!f.optString("protocol", "").startsWith("m3u8")) continue
+                    val abr = f.optDouble("abr", f.optDouble("tbr", 0.0)).takeIf { !it.isNaN() } ?: 0.0
+                    if (abr > bestA) { bestA = abr; audioManifest = f.optString("url").ifBlank { null } }
+                }
             }
         }
         return VideoMeta(
@@ -263,6 +274,7 @@ object Ytdl {
             autoSubs = keys("automatic_captions"),
             extractor = json.optString("extractor_key", ""),
             liveManifest = manifest,
+            liveAudioManifest = audioManifest,
             liveKbps = kbps,
         )
     }
@@ -280,6 +292,7 @@ object Ytdl {
             addOption("--no-playlist")
             addOption("--concurrent-fragments", "4")
             addOption("--no-mtime")
+            addOption("--downloader-args", "ffmpeg_i:-extension_picky 0")
             addOption("-o", File(dir, "$name.%(ext)s").absolutePath)
         }
         return dir.listFiles { f -> f.name.startsWith("$name.") && !f.name.endsWith(".part") && f.length() > 0 }
@@ -317,6 +330,8 @@ object Ytdl {
             addOption("--no-playlist")
             addOption("--merge-output-format", "mp4")
             addOption("--no-mtime")
+            // The phone's ffmpeg refuses YouTube's HLS pieces (AAC sound named .ts) unless told not to be picky.
+            addOption("--downloader-args", "ffmpeg_i:-extension_picky 0")
             if (section == null) {
                 addOption("--downloader", "ffmpeg")
                 addOption("--downloader-args", "ffmpeg_o:-t $seconds")

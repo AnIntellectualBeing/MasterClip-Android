@@ -98,9 +98,10 @@ object ClipEngine {
     /** About this many seconds of sound are decoded to find moments (decoding runs about 20x real time on a phone). */
     private const val BURST_BUDGET_SEC = 720.0
 
-    fun start(context: Context, request: ClipRequest) {
+    fun start(context: Context, requestIn: ClipRequest) {
         if (job?.isActive == true) return
         val app = context.applicationContext
+        val request = requestIn
         _state.value = EngineState(phase = Phase.WORKING, step = "Getting ready", total = request.count)
         startedAt = SystemClock.elapsedRealtime()
         jobStart = startedAt
@@ -583,7 +584,28 @@ object ClipEngine {
             }
         }
         val file = try {
-            io { Ytdl.live(url, work, "live", seconds, section) }
+            val fastOk = section != null && meta.liveManifest != null && meta.liveAudioManifest != null
+            var made: File? = null
+            if (fastOk) {
+                // Fetch the pieces several at once (yt-dlp's own way runs only as fast as the stream plays).
+                val v = File(work, "live_v.ts")
+                val a = File(work, "live_a.aac")
+                try {
+                    val got = Hls.fetchLast(meta.liveManifest!!, meta.liveAudioManifest!!, seconds.toDouble(), v, a)
+                    val out = File(work, "live.mp4")
+                    val what = io { Remux.merge(v, 0.0, a, 0.0, out) }
+                    Log.i(TAG, "live join: $what")
+                    lap("hls last part ${got.roundToInt()}s fetched + joined in ${SystemClock.elapsedRealtime() - recStart} ms")
+                    made = out
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "fast last-part download failed (${e.message}); using yt-dlp", e)
+                } finally {
+                    v.delete(); a.delete()
+                }
+            }
+            made ?: io { Ytdl.live(url, work, "live", seconds, section) }
         } finally {
             ticker.cancel()
         }
@@ -595,6 +617,7 @@ object ClipEngine {
         if (req.captions) note("Live streams have no captions to read yet, so these clips have none.")
         val uri = Uri.fromFile(file)
         val size = MediaTools.probe(file)
+        Log.i(TAG, "live file: ${size.width}x${size.height} ${size.durationMs} ms")
         clipsFromFile(context, req.copy(captions = false), uri, size, meta.title, 0.6f, null, null)
     }
 

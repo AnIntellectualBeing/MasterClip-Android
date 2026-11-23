@@ -147,7 +147,7 @@ object MediaTools {
             } ?: return emptyList()
             ex.selectTrack(track)
             val format = ex.getTrackFormat(track)
-            val c = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+            var c = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
             codec = c
             c.configure(format, null, null, 0)
             c.start()
@@ -216,7 +216,11 @@ object MediaTools {
                 if (n > 0) perSecond += sqrt(sum / n).toFloat()
                 result += perSecond.toFloatArray()
                 if (ri < ranges.size - 1) {
-                    c.flush()
+                    runCatching { c.stop() }
+                    c.release()
+                    c = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+                    codec = c
+                    c.configure(format, null, null, 0)
                     c.start()
                 }
             }

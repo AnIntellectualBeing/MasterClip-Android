@@ -37,7 +37,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.anintellectualcompany.masterclip.engine.CaptionPosition
+import com.anintellectualcompany.masterclip.engine.CaptionStyle
 import com.anintellectualcompany.masterclip.engine.EngineState
+import com.anintellectualcompany.masterclip.engine.LiveMode
+import com.anintellectualcompany.masterclip.engine.Search
 import com.anintellectualcompany.masterclip.engine.LayoutChoice
 import com.anintellectualcompany.masterclip.engine.etaText
 import com.anintellectualcompany.masterclip.engine.findLink
@@ -55,13 +59,12 @@ data class Choices(
     val captions: Boolean = true,
     val from: String = "",
     val to: String = "",
-)
-
-private val layoutHelp = mapOf(
-    LayoutChoice.AUTO to "Picks the best look for each clip",
-    LayoutChoice.FACECAM to "Streamer cam on top, game below",
-    LayoutChoice.FOLLOW to "Crops to the person talking",
-    LayoutChoice.FULL to "Whole video in the middle",
+    val captionStyle: CaptionStyle = CaptionStyle.POP,
+    val captionPosition: CaptionPosition = CaptionPosition.AUTO,
+    val liveMinutes: Int = 10,
+    val liveMode: LiveMode = LiveMode.RECORD_NEXT,
+    /** Set when a search result says this stream is live right now. */
+    val liveHint: Boolean = false,
 )
 
 @Composable
@@ -69,6 +72,7 @@ fun HomeScreen(
     choices: Choices,
     onChange: (Choices) -> Unit,
     onPickVideo: () -> Unit,
+    onSearch: () -> Unit,
     onMake: () -> Unit,
     recent: List<File>,
     onOpenClip: (File) -> Unit,
@@ -76,6 +80,7 @@ fun HomeScreen(
     val clipboard = LocalClipboardManager.current
     var showRange by remember { mutableStateOf(choices.from.isNotBlank() || choices.to.isNotBlank()) }
     val rangeOk = (choices.from.isBlank() || parseClock(choices.from) != null) && (choices.to.isBlank() || parseClock(choices.to) != null)
+    val isLive = choices.localUri == null && (choices.liveHint || Search.looksLive(findLink(choices.url)))
     val hasSource = choices.localUri != null || findLink(choices.url) != null
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -89,7 +94,7 @@ fun HomeScreen(
             if (choices.localUri == null) {
                 OutlinedTextField(
                     value = choices.url,
-                    onValueChange = { onChange(choices.copy(url = it)) },
+                    onValueChange = { onChange(choices.copy(url = it, liveHint = false)) },
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("Paste a YouTube or Twitch link") },
                     singleLine = true,
@@ -98,11 +103,12 @@ fun HomeScreen(
                     trailingIcon = {
                         TextButton(onClick = {
                             val text = clipboard.getText()?.text
-                            onChange(choices.copy(url = findLink(text) ?: text ?: ""))
+                            onChange(choices.copy(url = findLink(text) ?: text ?: "", liveHint = false))
                         }) { Text("Paste", color = Ink.brand, fontWeight = FontWeight.Bold) }
                     },
                 )
                 Center("or", size = 13)
+                SoftButton("Search YouTube and Twitch streams", Modifier.fillMaxWidth(), onSearch)
                 SoftButton("Pick a video from your phone", Modifier.fillMaxWidth(), onPickVideo)
             } else {
                 Row(
@@ -115,33 +121,21 @@ fun HomeScreen(
             }
         }
 
+        if (isLive) {
+            Card {
+                Label("LIVE STREAM")
+                LiveControls(choices, onChange)
+            }
+        }
+
         Card {
             Label("2 · YOUR CLIPS")
             Text("How many", color = Ink.text, fontWeight = FontWeight.SemiBold)
             Pills(listOf(3, 5, 8, 10), choices.count, { "$it" }) { onChange(choices.copy(count = it)) }
             Text("How long", color = Ink.text, fontWeight = FontWeight.SemiBold)
             Pills(listOf(30, 45, 60, 90), choices.length, { "${it}s" }) { onChange(choices.copy(length = it)) }
-            Text("Look", color = Ink.text, fontWeight = FontWeight.SemiBold)
-            for (row in LayoutChoice.entries.chunked(2)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (l in row) {
-                        val on = l == choices.layout
-                        Column(
-                            Modifier
-                                .weight(1f)
-                                .heightIn(min = 64.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(if (on) Ink.brandSoft else Ink.soft)
-                                .border(2.dp, if (on) Ink.brand else Color.Transparent, RoundedCornerShape(14.dp))
-                                .clickable(role = Role.RadioButton) { onChange(choices.copy(layout = l)) }
-                                .padding(10.dp),
-                        ) {
-                            Text(l.label, fontWeight = FontWeight.Bold, color = if (on) Ink.brandDark else Ink.text)
-                            Text(layoutHelp[l] ?: "", fontSize = 12.sp, color = Ink.muted, lineHeight = 15.sp)
-                        }
-                    }
-                }
-            }
+            Text("Template", color = Ink.text, fontWeight = FontWeight.SemiBold)
+            TemplatePicker(choices.layout) { onChange(choices.copy(layout = it)) }
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Switch) { onChange(choices.copy(captions = !choices.captions)) },
                 verticalAlignment = Alignment.CenterVertically,
@@ -155,6 +149,14 @@ fun HomeScreen(
                     onCheckedChange = { onChange(choices.copy(captions = it)) },
                     colors = SwitchDefaults.colors(checkedTrackColor = Ink.brand),
                 )
+            }
+            AnimatedVisibility(choices.captions) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Caption style", color = Ink.text, fontWeight = FontWeight.SemiBold)
+                    CaptionStylePicker(choices.captionStyle) { onChange(choices.copy(captionStyle = it)) }
+                    Text("Caption position", color = Ink.text, fontWeight = FontWeight.SemiBold)
+                    PositionChips(choices.captionPosition) { onChange(choices.copy(captionPosition = it)) }
+                }
             }
             TextButton(onClick = { showRange = !showRange }, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(if (showRange) "▾ Only part of the video" else "▸ Only part of the video (long streams)", color = Ink.brandDark)

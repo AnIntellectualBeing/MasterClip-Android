@@ -44,6 +44,8 @@ import com.anintellectualcompany.masterclip.ui.HomeScreen
 import com.anintellectualcompany.masterclip.ui.Ink
 import com.anintellectualcompany.masterclip.ui.MasterClipTheme
 import com.anintellectualcompany.masterclip.ui.PlayerDialog
+import com.anintellectualcompany.masterclip.ui.SearchScreen
+import com.anintellectualcompany.masterclip.ui.Settings
 import com.anintellectualcompany.masterclip.ui.WorkingScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -82,14 +84,15 @@ class MainActivity : ComponentActivity() {
     @androidx.compose.runtime.Composable
     private fun Root() {
         val state by ClipEngine.state.collectAsStateWithLifecycle()
-        var choices by remember { mutableStateOf(Choices()) }
+        var choices by remember { mutableStateOf(Settings.load(applicationContext)) }
+        var searching by remember { mutableStateOf(false) }
         var open by remember { mutableStateOf<File?>(null) }
         var recent by remember { mutableStateOf(emptyList<File>()) }
         var refresh by remember { mutableStateOf(0) }
 
         val sharedNow by shared
         LaunchedEffect(sharedNow) {
-            sharedNow?.let { s -> choices = choices.copy(url = s.url, localUri = s.localUri, localName = s.localName); shared.value = null }
+            sharedNow?.let { s -> choices = choices.copy(url = s.url, localUri = s.localUri, localName = s.localName, liveHint = false); shared.value = null }
         }
         LaunchedEffect(state.phase, state.clips.size, refresh) {
             recent = withContext(Dispatchers.IO) { Library.recent(applicationContext) }
@@ -109,10 +112,15 @@ class MainActivity : ComponentActivity() {
             captions = choices.captions,
             rangeStart = parseClock(choices.from),
             rangeEnd = parseClock(choices.to),
+            captionStyle = choices.captionStyle,
+            captionPosition = choices.captionPosition,
+            liveMinutes = choices.liveMinutes,
+            liveMode = choices.liveMode,
         )
 
         fun make() {
             if (Build.VERSION.SDK_INT >= 33) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+            Settings.save(applicationContext, choices)
             ClipEngine.start(this, request())
         }
 
@@ -128,9 +136,19 @@ class MainActivity : ComponentActivity() {
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
                 when (state.phase) {
-                    Phase.IDLE -> HomeScreen(
+                    Phase.IDLE -> if (searching) {
+                        androidx.activity.compose.BackHandler { searching = false }
+                        SearchScreen(
+                            onBack = { searching = false },
+                            onPick = { url, live ->
+                                choices = choices.copy(url = url, localUri = null, localName = null, liveHint = live)
+                                searching = false
+                            },
+                        )
+                    } else HomeScreen(
                         choices = choices,
-                        onChange = { choices = it },
+                        onChange = { choices = it; Settings.save(applicationContext, it) },
+                        onSearch = { searching = true },
                         onPickVideo = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
                         onMake = ::make,
                         recent = recent,

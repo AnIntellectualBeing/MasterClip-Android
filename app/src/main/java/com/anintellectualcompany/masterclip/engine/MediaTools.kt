@@ -12,9 +12,13 @@ import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import java.io.File
 import kotlin.coroutines.coroutineContext
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sqrt
 
 data class VideoSize(val width: Int, val height: Int, val durationMs: Long)
@@ -126,6 +130,61 @@ object MediaTools {
         return Scan(out, PanelRefine.mean(edgeMaps, ew, eh))
     }
 
+    /**
+     * Same as [loudnessRanges] but on several decoders at once. One phone decoder runs only about 7x faster than
+     * the sound plays, but the phone has several cores, so the stretches are cut into pieces of whole seconds
+     * (the per-second numbers line up exactly) and handed to [workers] decoders.
+     */
+    suspend fun loudnessParallel(context: Context, uri: Uri, ranges: List<Pair<Double, Double>>, workers: Int = 4, onProgress: (Float) -> Unit = {}): List<FloatArray> {
+        val total = ranges.sumOf { it.second - it.first }
+        if (workers <= 1 || total < 40 || ranges.any { it.second >= Double.MAX_VALUE / 2 }) return loudnessRanges(context, uri, ranges, onProgress)
+        val target = max(10, kotlin.math.ceil(total / workers).toInt())
+        class Piece(val range: Int, val order: Int, val from: Double, val to: Double)
+        val pieces = ArrayList<Piece>()
+        for ((ri, r) in ranges.withIndex()) {
+            val secs = kotlin.math.ceil(r.second - r.first).toInt().coerceAtLeast(1)
+            var k = 0
+            var o = 0
+            while (k < secs) {
+                val n = min(target, secs - k)
+                pieces += Piece(ri, o++, r.first + k, if (k + n >= secs) r.second else r.first + k + n)
+                k += n
+            }
+        }
+        // Contiguous groups of about equal length, one per worker.
+        val groups = ArrayList<ArrayList<Piece>>()
+        var acc = 0.0
+        for (p in pieces) {
+            if (groups.isEmpty() || (acc >= total / workers && groups.size < workers)) { groups.add(ArrayList()); acc = 0.0 }
+            groups.last().add(p)
+            acc += p.to - p.from
+        }
+        val results = java.util.concurrent.ConcurrentHashMap<Pair<Int, Int>, FloatArray>()
+        val doneWorkers = java.util.concurrent.atomic.AtomicInteger()
+        coroutineScope {
+            groups.map { g ->
+                async(kotlinx.coroutines.Dispatchers.Default) {
+                    val sorted = g.sortedBy { it.from }
+                    val out = loudnessRanges(context, uri, sorted.map { it.from to it.to })
+                    sorted.forEachIndexed { i, p -> out.getOrNull(i)?.let { results[p.range to p.order] = it } }
+                    onProgress(doneWorkers.incrementAndGet().toFloat() / groups.size)
+                }
+            }.forEach { it.await() }
+        }
+        return ranges.indices.map { ri ->
+            val mine = pieces.filter { it.range == ri }.sortedBy { it.order }
+            // A piece can run a fraction past its end; cut it to whole seconds so the pieces join up (the last one keeps its tail).
+            val parts = mine.mapIndexed { i, p ->
+                val a = results[ri to p.order] ?: FloatArray(0)
+                if (i < mine.size - 1) a.copyOf(min(a.size, kotlin.math.ceil(p.to - p.from).toInt())) else a
+            }
+            val flat = FloatArray(parts.sumOf { it.size })
+            var at = 0
+            for (a in parts) { a.copyInto(flat, at); at += a.size }
+            flat
+        }
+    }
+
     /** Loudness (RMS) for every second of the sound track (or of [fromSec]..[toSec] of it). */
     suspend fun loudness(context: Context, uri: Uri, onProgress: (Float) -> Unit, fromSec: Double = 0.0, toSec: Double? = null): FloatArray =
         loudnessRanges(context, uri, listOf(fromSec to (toSec ?: Double.MAX_VALUE)), onProgress).firstOrNull() ?: FloatArray(0)
@@ -161,7 +220,9 @@ object MediaTools {
                 coroutineContext.ensureActive()
                 val fromUs = (r.first * 1_000_000).toLong()
                 val toUs = if (r.second >= Double.MAX_VALUE / 2) Long.MAX_VALUE else (r.second * 1_000_000).toLong()
-                // Skip, without decoding, up to the start of this stretch.
+                // Jump to the start of this stretch (a far jump is a seek; the last bit is skipped without decoding).
+                val here = ex.sampleTime - base
+                if (ex.sampleTime < 0 || here > fromUs + 100_000 || fromUs - here > 3_000_000) ex.seekTo(base + fromUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                 while (ex.sampleTime >= 0 && ex.sampleTime - base < fromUs) ex.advance()
                 if (ex.sampleTime < 0) break
                 val perSecond = ArrayList<Float>()

@@ -96,7 +96,8 @@ object ClipEngine {
     private const val SCAN_CAP_SLOW_SEC = 20 * 60.0
     private const val CHAT_DEADLINE_MS = 60_000L
     /** About this many seconds of sound are decoded to find moments (decoding runs about 20x real time on a phone). */
-    private const val BURST_BUDGET_SEC = 720.0
+    private const val BURST_BUDGET_SEC = 600.0
+    private const val LISTEN_WORKERS = 4
 
     fun start(context: Context, requestIn: ClipRequest) {
         if (job?.isActive == true) return
@@ -367,28 +368,35 @@ object ClipEngine {
         onProgress: (Float) -> Unit,
     ): List<Moment> {
         val t0 = SystemClock.elapsedRealtime()
-        val cpu = Semaphore(3)
         val all = sounds.sumOf { it.dur }.coerceAtLeast(1.0)
 
-        // Step 1: short bursts spread over everything.
+        // Step 1: short bursts spread over everything (the whole sound when it is short enough: then these ARE the
+        // exact numbers and step 2 is not needed). Several decoders work at once, see MediaTools.loudnessParallel.
         val coarse = ArrayList<Pair<Sound, FloatArray>>() // per-second loudness guess, by interpolation between bursts
+        val whole = ArrayList<Pair<Double, FloatArray>>() // sounds heard in full: start second + loudness of every second
         var done = 0
-        coroutineScope {
-            sounds.map { s ->
-                async {
-                    cpu.withPermit {
-                        val bursts = Moments.bursts(0.0, s.dur, 8.0, BURST_BUDGET_SEC * s.dur / all)
-                        val rms = MediaTools.loudnessRanges(context, s.uri, bursts)
-                        val points = rms.mapIndexedNotNull { i, v -> if (v.isEmpty()) null else Moments.RatePoint((bursts[i].first + bursts[i].second) / 2, v.average()) }
-                        val guess = Moments.rateScore(points, s.dur.toInt().coerceAtLeast(1), 0)
-                        synchronized(coarse) { coarse += s to guess.map { it.toFloat() }.toFloatArray(); done++ }
-                        onProgress(0.5f * done / sounds.size)
-                    }
-                }
-            }.forEach { it.await() }
+        for (s in sounds) {
+            coroutineContext.ensureActive()
+            val bursts = Moments.bursts(0.0, s.dur, 8.0, BURST_BUDGET_SEC * s.dur / all)
+            val rms = MediaTools.loudnessParallel(context, s.uri, bursts, LISTEN_WORKERS)
+            if (bursts.size == 1 && bursts[0].first <= 0.5 && bursts[0].second >= s.dur - 0.5) {
+                rms.firstOrNull()?.takeIf { it.isNotEmpty() }?.let { whole += s.start to it }
+            } else {
+                val points = rms.mapIndexedNotNull { i, v -> if (v.isEmpty()) null else Moments.RatePoint((bursts[i].first + bursts[i].second) / 2, v.average()) }
+                val guess = Moments.rateScore(points, s.dur.toInt().coerceAtLeast(1), 0)
+                coarse += s to guess.map { it.toFloat() }.toFloatArray()
+            }
+            done++
+            onProgress(0.5f * done / sounds.size)
         }
         coroutineContext.ensureActive()
-        lap("coarse listen ${SystemClock.elapsedRealtime() - t0} ms")
+        lap("coarse listen ${SystemClock.elapsedRealtime() - t0} ms (${whole.size} heard in full, ${coarse.size} sampled)")
+        if (coarse.isEmpty()) {
+            if (whole.isEmpty()) return emptyList()
+            val (m, sd) = Moments.stats(whole.flatMap { it.second.asList() }.toFloatArray())
+            val score = Moments.placeSlices(total, whole.map { (st, v) -> st to Moments.loudnessScore(v, m, sd) })
+            return Moments.pick(score, count, length, rs, re)
+        }
         val (cm, csd) = Moments.stats(coarse.flatMap { it.second.asList() }.toFloatArray())
         val coarseScore = Moments.placeSlices(total, coarse.map { (s, v) -> s.start to Moments.loudnessScore(v, cm, csd) })
 
@@ -396,18 +404,15 @@ object ClipEngine {
         val windows = Moments.pick(coarseScore, max(count * 3, 6), length, rs, re).map { (it.start - 10).coerceAtLeast(0.0) to it.end }
         val exact = ArrayList<Pair<Double, FloatArray>>()
         done = 0
-        coroutineScope {
-            val bySound = windows.groupBy { w -> sounds.firstOrNull { w.first >= it.start - 1 && w.first < it.start + it.dur } }
-            bySound.entries.filter { it.key != null }.map { (s, ws) ->
-                async {
-                    cpu.withPermit {
-                        val sorted = ws.sortedBy { it.first }.map { (a, b) -> max(0.0, a - s!!.start) to (b - s.start) }
-                        val rms = MediaTools.loudnessRanges(context, s!!.uri, sorted)
-                        synchronized(exact) { rms.forEachIndexed { i, v -> exact += (s.start + sorted[i].first) to v }; done += ws.size }
-                        onProgress(0.5f + 0.5f * done / windows.size)
-                    }
-                }
-            }.forEach { it.await() }
+        val bySound = windows.groupBy { w -> sounds.firstOrNull { w.first >= it.start - 1 && w.first < it.start + it.dur } }
+        for ((s, ws) in bySound) {
+            if (s == null) continue
+            coroutineContext.ensureActive()
+            val sorted = ws.sortedBy { it.first }.map { (a, b) -> max(0.0, a - s.start) to (b - s.start) }
+            val rms = MediaTools.loudnessParallel(context, s.uri, sorted, LISTEN_WORKERS)
+            rms.forEachIndexed { i, v -> exact += (s.start + sorted[i].first) to v }
+            done += ws.size
+            onProgress(0.5f + 0.5f * done / windows.size)
         }
         lap("exact loudness on ${windows.size} windows, ${SystemClock.elapsedRealtime() - t0} ms in all")
         if (exact.isEmpty()) return emptyList()
@@ -565,12 +570,21 @@ object ClipEngine {
         val expected = LiveMath.expectedBytes(meta.liveKbps, seconds.toDouble())
         val processing = 20 * req.count + 30 // seconds of work after the recording, a rough guess for the countdown
 
+        val twitchLogin = if (section == null && meta.extractor.startsWith("Twitch")) TwitchPlaylist.channel(meta.url) ?: TwitchPlaylist.channel(url) else null
+        val rec = TwitchRec.Status()
+        var recFailed = false
         val ticker = scope.launch {
             while (true) {
                 val el = (SystemClock.elapsedRealtime() - recStart) / 1000.0
                 val frac: Double
                 val left: Int
-                if (section == null) {
+                if (twitchLogin != null && !recFailed) {
+                    val got = rec.liveSec
+                    frac = got / seconds
+                    left = max(0.0, seconds - got).roundToInt()
+                    val ad = if (rec.waitingAd) ". Twitch is showing an ad, waiting for the stream..." else ""
+                    step("$noun: ${LiveMath.clock(got.toInt())} of ${LiveMath.clock(seconds)} (${LiveMath.clock(left)} left)$ad")
+                } else if (section == null) {
                     frac = el / seconds
                     left = max(0.0, seconds - el).roundToInt()
                     step("$noun: ${LiveMath.clock(el.toInt())} of ${LiveMath.clock(seconds)} (${LiveMath.clock(left)} left)")
@@ -604,6 +618,24 @@ object ClipEngine {
                     Log.w(TAG, "fast last-part download failed (${e.message}); using yt-dlp", e)
                 } finally {
                     v.delete(); a.delete()
+                }
+            }
+            if (made == null && twitchLogin != null) {
+                val ts = File(work, "live_tw.ts")
+                try {
+                    val got = TwitchRec.record(twitchLogin, seconds.toDouble(), ts, rec)
+                    val out = File(work, "live.mp4")
+                    Log.i(TAG, "twitch rebase: ${io { Remux.rebase(ts, out) }}")
+                    lap("twitch recorded ${got.roundToInt()}s live + joined in ${SystemClock.elapsedRealtime() - recStart} ms")
+                    if (got < seconds - 5) note("Twitch showed ads or the stream hiccupped, so this recording is ${LiveMath.clock(got.roundToInt())} long.")
+                    made = out
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "twitch recorder failed (${e.message}); using yt-dlp", e)
+                    recFailed = true
+                } finally {
+                    ts.delete()
                 }
             }
             made ?: io {
@@ -685,7 +717,7 @@ object ClipEngine {
             Log.w(TAG, "listening failed", e)
             emptyList()
         }
-        lap("listening done ${SystemClock.elapsedRealtime() - t} ms -> ${found.size} moments")
+        lap("listening done ${SystemClock.elapsedRealtime() - t} ms -> ${found.size} moments ${found.joinToString { "%.0f-%.0f".format(it.start, it.end) }}")
         if (found.isEmpty()) note("Couldn't listen to this video, so the clips are spread across it.")
         val moments = found.ifEmpty { Moments.spread(duration, req.count, length, rs, re) }
         _state.update { it.copy(total = moments.size) }

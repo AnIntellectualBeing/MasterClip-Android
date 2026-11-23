@@ -73,7 +73,15 @@ object Renderer {
             transformer = Transformer.Builder(context.applicationContext)
                 .setVideoMimeType(MimeTypes.VIDEO_H264)
                 .setAudioMimeType(MimeTypes.AUDIO_AAC)
-                .setEncoderFactory(DefaultEncoderFactory.Builder(context.applicationContext).setEnableFallback(true).build())
+                .setEncoderFactory(
+                    DefaultEncoderFactory.Builder(context.applicationContext)
+                        .setEnableFallback(true)
+                        // ~8 Mbps: sharp on Reels/Shorts, about half the size of the encoder's default.
+                        .setRequestedVideoEncoderSettings(
+                            androidx.media3.transformer.VideoEncoderSettings.Builder().setBitrate(8_000_000).build()
+                        )
+                        .build()
+                )
                 .addListener(object : Transformer.Listener {
                     override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                         handler.removeCallbacks(poll)

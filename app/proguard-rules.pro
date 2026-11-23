@@ -1,0 +1,16 @@
+# youtubedl-android maps yt-dlp JSON with Jackson by reflection.
+-keep class com.yausername.** { *; }
+-keep class com.fasterxml.jackson.** { *; }
+-dontwarn com.fasterxml.jackson.**
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+-dontwarn org.apache.commons.**
+-keep class org.apache.commons.compress.** { *; }
+
+# Media3 loads some decoders/extractors by name.
+-keep class androidx.media3.decoder.** { *; }
+-keep class androidx.media3.effect.** { *; }
+-dontwarn androidx.media3.**
+
+# ML Kit
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_face** { *; }

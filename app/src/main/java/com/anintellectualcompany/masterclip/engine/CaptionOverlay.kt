@@ -15,7 +15,12 @@ import androidx.media3.effect.StaticOverlaySettings
  * A new bitmap is drawn only when the visible words change, so the GPU upload is rare.
  */
 @UnstableApi
-class CaptionOverlay(private val chunks: List<Chunk>, captionY: Float) : BitmapOverlay() {
+class CaptionOverlay(
+    private val chunks: List<Chunk>,
+    captionY: Float,
+    private val style: CaptionStyle = CaptionStyle.POP,
+    private val position: CaptionPosition = CaptionPosition.AUTO,
+) : BitmapOverlay() {
     private val width = LayoutPlan.OUT_W
     private val height = 360
     private val empty = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)

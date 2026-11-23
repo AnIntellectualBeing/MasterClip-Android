@@ -38,6 +38,8 @@ object Renderer {
         chunks: List<Chunk>,
         out: File,
         onProgress: (Float) -> Unit,
+        captionStyle: CaptionStyle = CaptionStyle.POP,
+        captionPosition: CaptionPosition = CaptionPosition.AUTO,
     ) = withContext(Dispatchers.Main) {
         out.parentFile?.mkdirs()
         out.delete()
@@ -53,7 +55,7 @@ object Renderer {
         }.build()
         val effects = ArrayList<Effect>()
         effects += LayoutEffect(plan)
-        if (chunks.isNotEmpty()) effects += OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(CaptionOverlay(chunks, plan.captionY)))
+        if (chunks.isNotEmpty()) effects += OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(CaptionOverlay(chunks, plan.captionY, captionStyle, captionPosition)))
         val edited = EditedMediaItem.Builder(item)
             .setEffects(Effects(ImmutableList.of(), ImmutableList.copyOf(effects)))
             .build()

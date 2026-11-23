@@ -35,6 +35,11 @@ data class ClipRequest(
     val captions: Boolean = true,
     val rangeStart: Double? = null,
     val rangeEnd: Double? = null,
+    val captionStyle: CaptionStyle = CaptionStyle.POP,
+    val captionPosition: CaptionPosition = CaptionPosition.AUTO,
+    /** Live streams: how many minutes to record / look back. */
+    val liveMinutes: Int = 10,
+    val liveMode: LiveMode = LiveMode.RECORD_NEXT,
 )
 
 enum class Phase { IDLE, WORKING, DONE, FAILED }
@@ -233,7 +238,7 @@ object ClipEngine {
                 )
                 step("Clip $n of ${moments.size}: making the vertical video")
                 val file = File(out, "MasterClip_${safeName(meta.title)}_$n.mp4")
-                Renderer.render(context, partUri, null, null, plan, chunks, file, stage(base + per * 0.5f, base + per * 0.97f))
+                Renderer.render(context, partUri, null, null, plan, chunks, file, stage(base + per * 0.5f, base + per * 0.97f), req.captionStyle, req.captionPosition)
                 part.delete()
                 Library.saveToGallery(context, file)
                 _state.update { it.copy(clips = it.clips + ClipInfo(file.absolutePath, realStart, realStart + size.durationMs / 1000.0, plan.mode)) }

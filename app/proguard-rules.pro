@@ -17,3 +17,13 @@
 
 # whisper JNI
 -keep class com.anintellectualcompany.masterclip.engine.WhisperLib { *; }
+
+# WorkManager (Room database + workers are created by reflection)
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+-keep class androidx.work.impl.WorkDatabase_Impl { <init>(); }
+-keep class * extends androidx.work.ListenableWorker { <init>(android.content.Context, androidx.work.WorkerParameters); }
+# Encrypted key storage (Tink)
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn com.google.api.client.http.**
+-dontwarn org.joda.time.**
+-keepclassmembers class * extends com.google.crypto.tink.shaded.protobuf.GeneratedMessageLite { <fields>; }

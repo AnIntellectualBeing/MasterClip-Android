@@ -142,7 +142,7 @@ fun HomeScreen(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("Captions", color = Ink.text, fontWeight = FontWeight.SemiBold)
-                    Text("Big word-by-word subtitles (YouTube links)", color = Ink.muted, fontSize = 12.sp)
+                    Text("Big word-by-word subtitles", color = Ink.muted, fontSize = 12.sp)
                 }
                 Switch(
                     checked = choices.captions,

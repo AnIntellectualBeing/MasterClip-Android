@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -103,6 +104,7 @@ object ClipEngine {
         if (job?.isActive == true) return
         val app = context.applicationContext
         val request = requestIn
+        Speech.newJob()
         _state.value = EngineState(phase = Phase.WORKING, step = "Getting ready", total = request.count)
         startedAt = SystemClock.elapsedRealtime()
         jobStart = startedAt
@@ -267,10 +269,9 @@ object ClipEngine {
             val plan = LayoutPlanner.plan(size.width, size.height, scan.faces, req.layout, scan.edges)
             lap("clip $n ready to render: ${size.width}x${size.height}, faces ${scan.faces.count { it.faces.isNotEmpty() }}/${scan.faces.size} -> ${plan.mode}, panel=${scan.edges != null}")
             val words = wordsJob.await()
-            val chunks = if (words.isEmpty()) emptyList() else Captions.chunks(
+            val chunks = if (words.isEmpty()) speechChunks(context, req, partUri, fromMs, toMs, n) else Captions.chunks(
                 Captions.slice(words, (m.start * 1000).toLong(), (m.start * 1000).toLong() + (toMs - fromMs))
             )
-            if (n == 1 && req.captions && words.isEmpty()) note("This video has no captions on YouTube, so the clips have none.")
             Prepared(partUri, fromMs, toMs, plan, chunks, m.start, m.start + (to - from), part.file)
         }
     }
@@ -659,11 +660,10 @@ object ClipEngine {
         smoothEta = -1.0
         etaFrom = 0.6f
         progress(0.6f)
-        if (req.captions) note("Live streams have no captions to read yet, so these clips have none.")
         val uri = Uri.fromFile(file)
         val size = MediaTools.probe(file)
         Log.i(TAG, "live file: ${size.width}x${size.height} ${size.durationMs} ms")
-        clipsFromFile(context, req.copy(captions = false), uri, size, meta.title, 0.6f, null, null)
+        clipsFromFile(context, req, uri, size, meta.title, 0.6f, null, null)
     }
 
     // ---------------------------------------------------------------- Video from the phone
@@ -687,7 +687,6 @@ object ClipEngine {
         lap("local video ${size.width}x${size.height} ${size.durationMs / 1000}s")
         progress(0.06f)
         clipsFromFile(context, req, uri, size, _state.value.title, 0.06f, req.rangeStart, req.rangeEnd)
-        if (req.captions) note("Captions come from YouTube, so videos from your phone are made without them.")
     }
 
     /** The common path for a video file on the phone (saved video or finished live recording). */
@@ -731,7 +730,39 @@ object ClipEngine {
             report(1f)
             val plan = LayoutPlanner.plan(size.width, size.height, scan.faces, req.layout, scan.edges)
             lap("clip ${i + 1}: faces ${scan.faces.count { it.faces.isNotEmpty() }}/${scan.faces.size} -> ${plan.mode}")
-            Prepared(uri, fromMs, toMs, plan, emptyList(), m.start, m.end, null)
+            val chunks = speechChunks(context, req, uri, fromMs, toMs, i + 1)
+            Prepared(uri, fromMs, toMs, plan, chunks, m.start, m.end, null)
+        }
+    }
+
+    private val modelLock = kotlinx.coroutines.sync.Mutex()
+
+    /** Captions from the clip's own sound (on the phone), for videos with no YouTube subtitles. */
+    private suspend fun speechChunks(context: Context, req: ClipRequest, uri: Uri, fromMs: Long, toMs: Long, n: Int): List<Chunk> {
+        if (!req.captions) return emptyList()
+        try {
+            if (!Speech.hasModel(context)) modelLock.withLock {
+                if (!Speech.hasModel(context)) {
+                    val label = "Getting the caption model (one time, ${Speech.MODEL_MB} MB)"
+                    step("$label...")
+                    var last = -1
+                    Speech.ensureModel(context) { f ->
+                        val pct = (f * 100).toInt()
+                        if (pct != last) { last = pct; step("$label... $pct%") }
+                    }
+                }
+            }
+            val t = SystemClock.elapsedRealtime()
+            val r = Speech.transcribe(context, uri, fromMs, toMs)
+            lap("clip $n captions (whisper) ${SystemClock.elapsedRealtime() - t} ms for ${(toMs - fromMs) / 1000}s: ${r.words.size} words, lang=${r.language}")
+            if (r.words.isEmpty()) note("Clip $n: no speech found, so no captions.")
+            return Captions.chunks(r.words)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "captions failed", e)
+            note("Clip $n has no captions: ${(e as? FriendlyError)?.message ?: "couldn't listen to it."}")
+            return emptyList()
         }
     }
 

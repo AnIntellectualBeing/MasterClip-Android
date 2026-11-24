@@ -26,8 +26,16 @@ android {
         applicationId = "com.anintellectualcompany.masterclip"
         minSdk = 26
         targetSdk = 36
-        versionCode = 26112301
-        versionName = "1.0.0"
+        versionCode = 26112401
+        versionName = "1.1.0"
+        externalNativeBuild {
+            cmake {
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+                arguments += listOf("-DANDROID_STL=c++_static", "-DANDROID_ARM_NEON=TRUE")
+                cFlags += listOf("-O3")
+                cppFlags += listOf("-O3")
+            }
+        }
     }
 
     signingConfigs {
@@ -63,6 +71,14 @@ android {
             isUniversalApk = false
         }
     }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+    ndkVersion = "27.1.12297006"
 
     buildFeatures {
         compose = true

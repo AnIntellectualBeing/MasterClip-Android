@@ -1,0 +1,26 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(masterclip_whisper C CXX)
+
+set(CMAKE_BUILD_TYPE Release)
+if (ANDROID_ABI STREQUAL "arm64-v8a")
+    # Several CPU builds (plain, dot-product, fp16, int8 ...): ggml picks the fastest one this phone can run.
+    set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
+    set(GGML_BACKEND_DL ON CACHE BOOL "" FORCE)
+    set(GGML_CPU_ALL_VARIANTS ON CACHE BOOL "" FORCE)
+else()
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+endif()
+set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+set(GGML_CPU_REPACK ON CACHE BOOL "" FORCE)
+
+add_subdirectory(whisper_src whisper_build)
+
+add_library(mcwhisper SHARED whisper_jni.cpp)
+target_include_directories(mcwhisper PRIVATE whisper_src/include whisper_src/ggml/include)
+target_link_libraries(mcwhisper whisper log)
+target_link_options(mcwhisper PRIVATE -Wl,-z,max-page-size=16384)

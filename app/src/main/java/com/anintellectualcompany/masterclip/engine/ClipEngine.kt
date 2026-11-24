@@ -533,6 +533,7 @@ object ClipEngine {
                 )
                 lap("clip ${i + 1} rendered in ${SystemClock.elapsedRealtime() - t} ms (${file.length() / 1024} KB)")
                 Library.saveToGallery(context, file)
+                PostWorker.auto(context, file)
                 _state.update { it.copy(clips = it.clips + ClipInfo(file.absolutePath, p.start, p.end, p.plan.mode)) }
             } catch (e: CancellationException) {
                 throw e

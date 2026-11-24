@@ -73,6 +73,7 @@ fun HomeScreen(
     onChange: (Choices) -> Unit,
     onPickVideo: () -> Unit,
     onSearch: () -> Unit,
+    onPosting: () -> Unit = {},
     onMake: () -> Unit,
     recent: List<File>,
     onOpenClip: (File) -> Unit,
@@ -88,6 +89,7 @@ fun HomeScreen(
             Text("MasterClip", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Ink.text)
             Text("Turn any video into Shorts, Reels and TikToks.", color = Ink.muted, fontSize = 15.sp)
         }
+        SoftButton("Posting to Instagram and YouTube", Modifier.fillMaxWidth(), onPosting)
 
         Card {
             Label("1 · YOUR VIDEO")

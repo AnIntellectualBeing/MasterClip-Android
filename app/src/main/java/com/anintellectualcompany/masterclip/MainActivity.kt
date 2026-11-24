@@ -44,6 +44,8 @@ import com.anintellectualcompany.masterclip.ui.HomeScreen
 import com.anintellectualcompany.masterclip.ui.Ink
 import com.anintellectualcompany.masterclip.ui.MasterClipTheme
 import com.anintellectualcompany.masterclip.ui.PlayerDialog
+import com.anintellectualcompany.masterclip.ui.PostDialog
+import com.anintellectualcompany.masterclip.ui.PostingScreen
 import com.anintellectualcompany.masterclip.ui.SearchScreen
 import com.anintellectualcompany.masterclip.ui.Settings
 import com.anintellectualcompany.masterclip.ui.WorkingScreen
@@ -86,6 +88,8 @@ class MainActivity : ComponentActivity() {
         val state by ClipEngine.state.collectAsStateWithLifecycle()
         var choices by remember { mutableStateOf(Settings.load(applicationContext)) }
         var searching by remember { mutableStateOf(false) }
+        var posting by remember { mutableStateOf(false) }
+        var postFile by remember { mutableStateOf<File?>(null) }
         var open by remember { mutableStateOf<File?>(null) }
         var recent by remember { mutableStateOf(emptyList<File>()) }
         var refresh by remember { mutableStateOf(0) }
@@ -136,7 +140,10 @@ class MainActivity : ComponentActivity() {
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
                 when (state.phase) {
-                    Phase.IDLE -> if (searching) {
+                    Phase.IDLE -> if (posting) {
+                        androidx.activity.compose.BackHandler { posting = false }
+                        PostingScreen(onBack = { posting = false })
+                    } else if (searching) {
                         androidx.activity.compose.BackHandler { searching = false }
                         SearchScreen(
                             onBack = { searching = false },
@@ -149,6 +156,7 @@ class MainActivity : ComponentActivity() {
                         choices = choices,
                         onChange = { choices = it; Settings.save(applicationContext, it) },
                         onSearch = { searching = true },
+                        onPosting = { posting = true },
                         onPickVideo = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
                         onMake = ::make,
                         recent = recent,
@@ -171,7 +179,11 @@ class MainActivity : ComponentActivity() {
                 file = f,
                 onClose = { open = null },
                 onDelete = { Library.delete(f); open = null; refresh++ },
+                onPost = { postFile = f },
             )
+        }
+        postFile?.let { f ->
+            PostDialog(f, onClose = { postFile = null }, onOpenSettings = { open = null; if (state.phase == Phase.DONE || state.phase == Phase.FAILED) ClipEngine.reset(); posting = true })
         }
     }
 }

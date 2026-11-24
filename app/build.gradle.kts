@@ -137,6 +137,8 @@ dependencies {
     implementation(libs.youtubedl.ffmpeg)
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
+    implementation(libs.androidx.work)
+    implementation(libs.androidx.security.crypto)
 
     testImplementation(libs.junit)
     testImplementation(libs.json)

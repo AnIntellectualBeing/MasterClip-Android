@@ -127,7 +127,7 @@ fun ClipThumb(file: File, modifier: Modifier = Modifier, onClick: () -> Unit) {
 
 /** Full-screen player for one clip, with Share and Delete. */
 @Composable
-fun PlayerDialog(file: File, onClose: () -> Unit, onDelete: () -> Unit) {
+fun PlayerDialog(file: File, onClose: () -> Unit, onDelete: () -> Unit, onPost: () -> Unit = {}) {
     val context = LocalContext.current
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -156,6 +156,12 @@ fun PlayerDialog(file: File, onClose: () -> Unit, onDelete: () -> Unit) {
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Ink.brand),
                 ) { Text("Share", fontWeight = FontWeight.Bold) }
+                Button(
+                    onClick = onPost,
+                    modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Ink.good),
+                ) { Text("Post", fontWeight = FontWeight.Bold) }
                 OutlinedButton(onClick = onDelete, modifier = Modifier.heightIn(min = 52.dp), shape = RoundedCornerShape(14.dp)) {
                     Text("Delete", color = Color.White)
                 }

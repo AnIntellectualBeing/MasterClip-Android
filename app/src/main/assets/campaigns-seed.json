@@ -1,0 +1,36 @@
+{
+  "updated": "2026-11-24",
+  "platforms": [
+    {
+      "id": "clip-tech",
+      "name": "Clip Tech",
+      "url": "https://clip.tech/clippers",
+      "pays": "Per 1,000 views, rate set by each campaign. Paid when the campaign ends.",
+      "payout_method": "PayPal",
+      "min_payout": null,
+      "good_for": ["streamers", "gaming"],
+      "note": "Join through their Discord from the page."
+    },
+    {
+      "id": "vyro",
+      "name": "Vyro",
+      "url": "https://www.vyro.com",
+      "pays": null,
+      "payout_method": null,
+      "min_payout": null,
+      "good_for": ["creators"],
+      "note": "Brands run campaigns and clippers post clips. Check each campaign for its rate."
+    },
+    {
+      "id": "content-rewards",
+      "name": "Content Rewards (Whop)",
+      "url": "https://whop.com/content-rewards/",
+      "pays": null,
+      "payout_method": null,
+      "min_payout": null,
+      "good_for": ["creators", "brands"],
+      "note": "A Whop community. Rates and rules are inside each campaign."
+    }
+  ],
+  "campaigns": []
+}

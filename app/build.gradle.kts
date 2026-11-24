@@ -26,8 +26,8 @@ android {
         applicationId = "com.anintellectualcompany.masterclip"
         minSdk = 26
         targetSdk = 36
-        versionCode = 26112401
-        versionName = "1.1.0"
+        versionCode = 26112402
+        versionName = "1.2.0"
         externalNativeBuild {
             cmake {
                 abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")

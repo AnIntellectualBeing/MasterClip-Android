@@ -49,6 +49,8 @@ data class ClipRequest(
     /** Live streams: how many minutes to record / look back. */
     val liveMinutes: Int = 10,
     val liveMode: LiveMode = LiveMode.RECORD_NEXT,
+    /** Set when the clips are made for a campaign. */
+    val campaignId: String? = null,
 )
 
 enum class Phase { IDLE, WORKING, DONE, FAILED }

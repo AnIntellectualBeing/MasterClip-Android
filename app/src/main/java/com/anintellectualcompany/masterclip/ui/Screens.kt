@@ -65,6 +65,8 @@ data class Choices(
     val liveMode: LiveMode = LiveMode.RECORD_NEXT,
     /** Set when a search result says this stream is live right now. */
     val liveHint: Boolean = false,
+    /** Set by Campaigns > Clip for this. Not remembered between launches. */
+    val campaign: com.anintellectualcompany.masterclip.engine.CampaignRef? = null,
 )
 
 @Composable
@@ -74,6 +76,7 @@ fun HomeScreen(
     onPickVideo: () -> Unit,
     onSearch: () -> Unit,
     onPosting: () -> Unit = {},
+    onCampaigns: () -> Unit = {},
     onMake: () -> Unit,
     recent: List<File>,
     onOpenClip: (File) -> Unit,
@@ -89,7 +92,9 @@ fun HomeScreen(
             Text("MasterClip", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Ink.text)
             Text("Turn any video into Shorts, Reels and TikToks.", color = Ink.muted, fontSize = 15.sp)
         }
+        SoftButton("Campaigns: get paid per views", Modifier.fillMaxWidth(), onCampaigns)
         SoftButton("Posting to Instagram and YouTube", Modifier.fillMaxWidth(), onPosting)
+        choices.campaign?.let { CampaignBanner(it.title) { onChange(choices.copy(campaign = null)) } }
 
         Card {
             Label("1 · YOUR VIDEO")

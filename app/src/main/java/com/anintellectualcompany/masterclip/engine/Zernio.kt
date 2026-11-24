@@ -16,13 +16,13 @@ interface Http {
 
 class HttpReply(val code: Int, val body: String, val headers: Map<String, String> = emptyMap())
 
-class UrlHttp : Http {
+class UrlHttp(private val connectMs: Int = 20_000, private val readMs: Int = 120_000) : Http {
     override fun send(method: String, url: String, headers: Map<String, String>, body: ByteArray?): HttpReply {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.requestMethod = method
-            c.connectTimeout = 20_000
-            c.readTimeout = 120_000
+            c.connectTimeout = connectMs
+            c.readTimeout = readMs
             headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
             if (body != null) {
                 c.doOutput = true

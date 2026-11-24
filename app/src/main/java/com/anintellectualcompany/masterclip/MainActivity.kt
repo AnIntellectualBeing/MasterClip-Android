@@ -37,6 +37,9 @@ import com.anintellectualcompany.masterclip.engine.Library
 import com.anintellectualcompany.masterclip.engine.Phase
 import com.anintellectualcompany.masterclip.engine.findLink
 import com.anintellectualcompany.masterclip.engine.parseClock
+import com.anintellectualcompany.masterclip.engine.Campaigns
+import com.anintellectualcompany.masterclip.engine.CampaignRef
+import com.anintellectualcompany.masterclip.ui.CampaignsScreen
 import com.anintellectualcompany.masterclip.ui.Choices
 import com.anintellectualcompany.masterclip.ui.DoneScreen
 import com.anintellectualcompany.masterclip.ui.FailedScreen
@@ -89,6 +92,8 @@ class MainActivity : ComponentActivity() {
         var choices by remember { mutableStateOf(Settings.load(applicationContext)) }
         var searching by remember { mutableStateOf(false) }
         var posting by remember { mutableStateOf(false) }
+        var campaigns by remember { mutableStateOf(false) }
+        var searchFor by remember { mutableStateOf("") }
         var postFile by remember { mutableStateOf<File?>(null) }
         var open by remember { mutableStateOf<File?>(null) }
         var recent by remember { mutableStateOf(emptyList<File>()) }
@@ -120,6 +125,7 @@ class MainActivity : ComponentActivity() {
             captionPosition = choices.captionPosition,
             liveMinutes = choices.liveMinutes,
             liveMode = choices.liveMode,
+            campaignId = choices.campaign?.id,
         )
 
         fun make() {
@@ -140,16 +146,33 @@ class MainActivity : ComponentActivity() {
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
                 when (state.phase) {
-                    Phase.IDLE -> if (posting) {
+                    Phase.IDLE -> if (campaigns) {
+                        androidx.activity.compose.BackHandler { campaigns = false }
+                        CampaignsScreen(
+                            onBack = { campaigns = false },
+                            onClipFor = { c ->
+                                val link = c.sources.firstNotNullOfOrNull { it.link }
+                                choices = choices.copy(
+                                    url = link ?: "", localUri = null, localName = null, liveHint = false,
+                                    length = Campaigns.lengthFor(c), captions = true, from = "", to = "",
+                                    campaign = CampaignRef(c.id, c.title),
+                                )
+                                Settings.save(applicationContext, choices)
+                                campaigns = false
+                                if (link == null) { searchFor = c.sources.firstOrNull()?.name ?: c.brand ?: c.title; searching = true }
+                            },
+                        )
+                    } else if (posting) {
                         androidx.activity.compose.BackHandler { posting = false }
                         PostingScreen(onBack = { posting = false })
                     } else if (searching) {
                         androidx.activity.compose.BackHandler { searching = false }
                         SearchScreen(
-                            onBack = { searching = false },
+                            onBack = { searching = false; searchFor = "" },
+                            initialQuery = searchFor,
                             onPick = { url, live ->
                                 choices = choices.copy(url = url, localUri = null, localName = null, liveHint = live)
-                                searching = false
+                                searching = false; searchFor = ""
                             },
                         )
                     } else HomeScreen(
@@ -157,6 +180,7 @@ class MainActivity : ComponentActivity() {
                         onChange = { choices = it; Settings.save(applicationContext, it) },
                         onSearch = { searching = true },
                         onPosting = { posting = true },
+                        onCampaigns = { campaigns = true },
                         onPickVideo = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
                         onMake = ::make,
                         recent = recent,

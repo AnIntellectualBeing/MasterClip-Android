@@ -52,11 +52,11 @@ import kotlinx.coroutines.withContext
 private val Live = Color(0xFFE53935)
 
 @Composable
-fun SearchScreen(onBack: () -> Unit, onPick: (url: String, live: Boolean) -> Unit) {
+fun SearchScreen(onBack: () -> Unit, onPick: (url: String, live: Boolean) -> Unit, initialQuery: String = "") {
     val context = LocalContext.current
     val focus = LocalFocusManager.current
     val scope = rememberCoroutineScope()
-    var query by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf(initialQuery) }
     var filter by remember { mutableStateOf(SearchFilter.ALL) }
     var hits by remember { mutableStateOf<List<SearchHit>?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -82,6 +82,8 @@ fun SearchScreen(onBack: () -> Unit, onPick: (url: String, live: Boolean) -> Uni
             }
         }
     }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (initialQuery.isNotBlank()) go() }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {

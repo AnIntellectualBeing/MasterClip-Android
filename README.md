@@ -5,6 +5,12 @@ This is the phone version of [MasterClip](https://github.com/AnIntellectualBeing
 
 **Download:** get the APK from [Releases](../../releases/latest). Most phones need `arm64-v8a`.
 
+## What's new in 1.2
+
+- **Campaigns:** open it from the start screen. See clipping campaigns that pay per views and sites that run them. **Clip for this** fills in the link (or searches the streamer), sets the clip length, turns captions on and shows a Campaign banner.
+- **My submissions:** add the link of a clip you posted, type its views, and see an estimate (views / 1000 x the campaign's rate) and a total. It is only an estimate.
+- The list comes from anintellectualcompany.com/campaigns.json. Offline, the app shows the last saved list, or the one built into the app.
+
 ## What's new in 1.1
 
 - **Much faster.** Reads the video once and downloads only the chosen parts, two at a time while the last clip is made. Three clips from a 15-minute video take about a minute and a half.

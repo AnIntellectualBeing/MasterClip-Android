@@ -3,7 +3,7 @@
 Turn any YouTube or Twitch video into vertical Shorts, Reels and TikToks, right on your phone.
 This is the phone version of [MasterClip](https://github.com/AnIntellectualBeing/MasterClip) for Windows.
 
-**Get it:** the app is sold at [masterprompt.anintellectualcompany.com/MasterClipPhone](https://masterprompt.anintellectualcompany.com/MasterClipPhone/) (₹349). APKs are not published here.
+**Get it:** the app is sold at [masterprompt.anintellectualcompany.com/MasterClipPhone](https://masterprompt.anintellectualcompany.com/MasterClipPhone/) (₹149). The code is open source and free to read and build; the ready-to-install APK is sold on the website and is not published here.
 
 ## What's new in 1.2
 

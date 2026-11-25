@@ -5,6 +5,9 @@ This is the phone version of [MasterClip](https://github.com/AnIntellectualBeing
 
 **Get it:** the app is sold at [masterprompt.anintellectualcompany.com/MasterClipPhone](https://masterprompt.anintellectualcompany.com/MasterClipPhone/) (₹149). The code is open source and free to read and build; the ready-to-install APK is sold on the website and is not published here.
 
+**Open source (MIT).** You can read, change and build this code yourself with Android Studio (`./gradlew assembleRelease`). No APK files are published in this repo or its Releases.
+
+
 ## What's new in 1.2
 
 - **Campaigns:** open it from the start screen. See clipping campaigns that pay per views and sites that run them. **Clip for this** fills in the link (or searches the streamer), sets the clip length, turns captions on and shows a Campaign banner.

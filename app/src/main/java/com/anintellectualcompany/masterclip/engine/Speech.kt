@@ -28,11 +28,10 @@ object WhisperLib {
 
 /** Speech to text on the phone, so every clip can have captions (live streams, phone videos, videos without subtitles). */
 object Speech {
-    const val MODEL_FILE = "ggml-tiny-q5_1.bin"
+    const val MODEL_FILE = "ggml-small-q5_1.bin"
     const val MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$MODEL_FILE"
-    const val MODEL_MB = 31
-    private const val MIN_MODEL_BYTES = 25_000_000L
-    private const val HINGLISH_PROMPT = "Aaj hum cricket ke baare mein baat karenge. Kya haal hai bhai, sab theek hai?"
+    const val MODEL_MB = 182
+    private const val MIN_MODEL_BYTES = 180_000_000L
 
     private val lock = Mutex()
     private var handle = 0L
@@ -105,12 +104,7 @@ object Speech {
                 val t2 = android.os.SystemClock.elapsedRealtime()
                 // The language is found once per job (finding it costs a whole extra pass), then reused.
                 val known = jobLang
-                var res = parse(WhisperLib.run(handle, pcm, known ?: "auto", if (known == "hi") HINGLISH_PROMPT else "", threads)?.toString(Charsets.UTF_8))
-                if (known == null && res.language == "hi" && res.words.any { w -> w.text.any { it in 'ऀ'..'ॿ' } }) {
-                    // Hindi: ask again with a Hinglish prompt so it writes in English letters.
-                    val again = parse(WhisperLib.run(handle, pcm, "hi", HINGLISH_PROMPT, threads)?.toString(Charsets.UTF_8))
-                    if (again.words.isNotEmpty()) res = again
-                }
+                val res = parse(WhisperLib.run(handle, pcm, known ?: "auto", "", threads)?.toString(Charsets.UTF_8))
                 if (known == null && res.language.isNotBlank() && res.words.size >= 5) jobLang = res.language
                 Log.i("MasterClip", "whisper: decode $tDecode ms, load $tLoad ms, run ${android.os.SystemClock.elapsedRealtime() - t2} ms, $threads threads, ${pcm.size / 16000} s of sound")
                 res
@@ -134,14 +128,17 @@ object Speech {
             if (text.none { it.isLetterOrDigit() }) continue
             val s = p[0].toLongOrNull() ?: continue
             val e = p[1].toLongOrNull() ?: continue
-            items += Word(text, s, max(e, s + 120))
+            items += Word(Hinglish.romanize(text), s, max(e, s + 120))
         }
         // Keep the words in order and never overlapping.
+        val timed = items.groupBy { it.startMs }.toSortedMap().map { (start, group) ->
+            Word(group.joinToString(" ") { it.text }, start, group.maxOf { it.endMs })
+        }
         val out = ArrayList<Word>()
-        for ((i, w) in items.withIndex()) {
-            val next = items.getOrNull(i + 1)?.startMs
-            val end = if (next != null && next > w.startMs) min(w.endMs, next) else w.endMs
-            out += Word(w.text, w.startMs, max(end, w.startMs + 80))
+        for ((i, w) in timed.withIndex()) {
+            val next = timed.getOrNull(i + 1)?.startMs
+            val end = if (next != null) min(w.endMs, next) else w.endMs
+            out += Word(w.text, w.startMs, end)
         }
         return Result(out, lang)
     }
@@ -190,7 +187,8 @@ object Pcm {
                     val inIdx = c.dequeueInputBuffer(0)
                     if (inIdx < 0) break
                     val t = ex.sampleTime
-                    val size = if (t < 0 || t - base > toUs) -1 else ex.readSampleData(c.getInputBuffer(inIdx)!!, 0)
+                    // AAC priming may have a negative timestamp. Only a missing track means EOF.
+                    val size = if (ex.sampleTrackIndex < 0 || t - base > toUs) -1 else ex.readSampleData(c.getInputBuffer(inIdx)!!, 0)
                     if (size < 0) {
                         c.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                         inputDone = true

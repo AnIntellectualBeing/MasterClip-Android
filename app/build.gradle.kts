@@ -26,8 +26,9 @@ android {
         applicationId = "com.anintellectualcompany.masterclip"
         minSdk = 26
         targetSdk = 36
-        versionCode = 26112402
-        versionName = "1.2.0"
+        versionCode = 26112702
+        versionName = "1.2.2"
+        testInstrumentationRunner = "com.anintellectualcompany.masterclip.engine.CaptionSmokeRunner"
         externalNativeBuild {
             cmake {
                 abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")

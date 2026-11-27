@@ -50,7 +50,8 @@ Java_com_anintellectualcompany_masterclip_engine_WhisperLib_run(JNIEnv *env, job
     env->ReleaseStringUTFChars(lang, l);
     env->ReleaseStringUTFChars(prompt, pr);
 
-    whisper_full_params wp = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    whisper_full_params wp = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
+    wp.beam_search.beam_size = 5;
     wp.n_threads = threads;
     wp.language = language.c_str();
     wp.detect_language = false;
@@ -66,6 +67,7 @@ Java_com_anintellectualcompany_masterclip_engine_WhisperLib_run(JNIEnv *env, job
     wp.suppress_blank = true;
     wp.temperature_inc = 0.0f;
     if (!initial.empty()) wp.initial_prompt = initial.c_str();
+    __android_log_print(ANDROID_LOG_INFO, TAG, "transcribe language=%s translate=%d samples=%d", wp.language, wp.translate, n);
 
     if (whisper_full(ctx, wp, samples.data(), (int) samples.size()) != 0) {
         __android_log_print(ANDROID_LOG_WARN, TAG, "whisper_full failed");

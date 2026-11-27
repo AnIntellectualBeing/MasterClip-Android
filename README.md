@@ -8,6 +8,16 @@ This is the phone version of [MasterClip](https://github.com/AnIntellectualBeing
 **Open source (MIT).** You can read, change and build this code yourself with Android Studio (`./gradlew assembleRelease`). No APK files are published in this repo or its Releases.
 
 
+## Caption development handoff (1.2.2)
+
+See [the handoff](docs/hinglish-handoff.txt) for the current implementation, remaining recognition errors, phone test results, and reproduction steps. Hindi retention and video export are verified on synthetic examples; natural human Hinglish accuracy still needs work.
+
+## What's new in 1.2.1
+
+- Fixed missing speech captions on AAC audio with negative starting timestamps.
+- Clips without subtitle words now use speech recognition, even when another part of the video has subtitles.
+- Words crossing the beginning of a clip are kept and trimmed to the clip boundary.
+
 ## What's new in 1.2
 
 - **Campaigns:** open it from the start screen. See clipping campaigns that pay per views and sites that run them. **Clip for this** fills in the link (or searches the streamer), sets the clip length, turns captions on and shows a Campaign banner.
@@ -20,7 +30,7 @@ This is the phone version of [MasterClip](https://github.com/AnIntellectualBeing
 - **Live streams.** Clip what already happened on a YouTube live, or record the next 5 to 30 minutes. Twitch lives are recorded with ad pieces skipped.
 - **Search.** Find YouTube and Twitch streams inside the app and see which are live now.
 - **Caption styles and templates.** Six caption looks, three positions, and template cards for the layout (face cam + gameplay, follow the face, full video + blur).
-- **Captions on every clip.** Speech to text runs on the phone (whisper.cpp), so live clips, videos from your phone and YouTube videos without subtitles get word-by-word captions too. The 31 MB caption model downloads once, the first time you need it. YouTube's own subtitles are still used when they exist. Hindi is written in English letters.
+- **Captions on every clip.** Speech to text runs on the phone (whisper.cpp), so live clips, videos from your phone and YouTube videos without subtitles get word-by-word captions too. The 182 MiB (190 MB) caption model downloads once, the first time you need it. YouTube's own subtitles are still used when they exist. Hindi is written in English letters.
 - **Post from the phone.** Add your Zernio key under **Posting to Instagram and YouTube**, tap **Post** on a clip to post now or schedule it, or turn on **Auto-post every clip** with a gap between posts. Instagram allows up to 10 posts a day and YouTube up to 50 a day per account.
 
 ## How to use it
@@ -54,7 +64,7 @@ Needs Android Studio's JDK (17+), the Android SDK (compileSdk 37), and the NDK 2
 gradlew :app:testDebugUnitTest      # unit tests (moments, captions, layout, text)
 gradlew :app:assembleDebug          # app/build/outputs/apk/debug/app-<abi>-debug.apk
 gradlew :app:assembleRelease -PsmokeTest   # R8 release, debug-signed, for testing
-tools\release.ps1                   # signed release APKs with the master key + GitHub upload
+tools\release.ps1 -NoUpload         # signed release APKs with the master key, kept local
 ```
 
 ## Privacy

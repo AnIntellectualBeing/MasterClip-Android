@@ -56,6 +56,33 @@ class MomentsTest {
 }
 
 class CaptionsTest {
+    @Test fun downloadedHindiCaptionsBecomeHinglishAndKeepClipTiming() = kotlinx.coroutines.runBlocking {
+        val words = Captions.parseVtt("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nभाई यह video अच्छा है।\n")
+        val result = Captions.forClip(words, 1000, 3000) { error("Subtitles are available") }.flatMap { it.words }
+        assertEquals(listOf("bhai", "yeh", "video", "accha", "hai."), result.map { it.text })
+        assertEquals(0L, result.first().startMs)
+        assertEquals(2000L, result.last().endMs)
+    }
+
+    @Test fun sliceKeepsSpeechAlreadyInProgressAtClipStart() {
+        val words = listOf(Word("hello", 900, 1300), Word("there", 1400, 1800))
+        assertEquals(listOf(Word("hello", 0, 300), Word("there", 400, 800)),
+            Captions.slice(words, 1000, 2000))
+    }
+
+    @Test fun missingCaptionsForSelectedClipUseSpeechRecognition() = kotlinx.coroutines.runBlocking {
+        val words = listOf(Word("intro", 0, 500))
+        val chunks = Captions.forClip(words, 1000, 2000) { listOf(Chunk(listOf(Word("spoken", 0, 500)))) }
+        assertEquals(listOf("spoken"), chunks.flatMap { it.words }.map { it.text })
+    }
+
+    @Test fun availableClipCaptionsDoNotRunSpeechRecognition() = kotlinx.coroutines.runBlocking {
+        val chunks = Captions.forClip(listOf(Word("hello", 1200, 1700)), 1000, 2000) {
+            error("Speech recognition is unnecessary when the clip has captions")
+        }
+        assertEquals(listOf(Word("hello", 200, 700)), chunks.flatMap { it.words })
+    }
+
     private val json3 = """
         {"events":[
           {"tStartMs":0,"dDurationMs":5000,"id":1},

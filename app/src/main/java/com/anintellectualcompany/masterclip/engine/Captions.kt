@@ -14,6 +14,13 @@ data class Chunk(val words: List<Word>) {
 
 /** YouTube captions (json3 with word timings, or plain WebVTT) -> timed words -> short on-screen chunks. */
 object Captions {
+    /** Prefer subtitle words for this clip, otherwise listen to the clip's own sound. */
+    suspend fun forClip(words: List<Word>, fromMs: Long, toMs: Long, speech: suspend () -> List<Chunk>): List<Chunk> {
+        val selected = slice(words, fromMs, toMs)
+        val result = if (selected.isEmpty()) speech() else chunks(selected)
+        return chunks(result.flatMap { it.words }.map { it.copy(text = Hinglish.romanize(it.text)) })
+    }
+
     private val noise = Regex("""^\[.*]$|^\(.*\)$""") // [Music], [Applause], (laughs)
 
     fun parseJson3(text: String): List<Word> {
@@ -93,8 +100,8 @@ object Captions {
 
     /** Words inside [fromMs, toMs), shifted so fromMs becomes 0. */
     fun slice(words: List<Word>, fromMs: Long, toMs: Long): List<Word> =
-        words.filter { it.startMs >= fromMs && it.startMs < toMs }
-            .map { Word(it.text, it.startMs - fromMs, min(it.endMs, toMs) - fromMs) }
+        words.filter { it.endMs > fromMs && it.startMs < toMs }
+            .map { Word(it.text, max(it.startMs, fromMs) - fromMs, min(it.endMs, toMs) - fromMs) }
 
     /** Groups of up to [maxWords] words / [maxChars] letters; a pause of 0.7 s also starts a new group. */
     fun chunks(words: List<Word>, maxWords: Int = 3, maxChars: Int = 18): List<Chunk> {

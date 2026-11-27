@@ -1,3 +1,18 @@
+# 1.2.2 — Hinglish captions
+
+- Hindi subtitle and speech text now uses the same local Hinglish spelling rules as the desktop app. English text and word timings are preserved.
+- Speech recognition no longer repeats Hindi transcription with an unrelated example prompt.
+- Replaced the tiny speech model with multilingual Whisper small and beam decoding to preserve spoken Hindi instead of producing English translations. The new model downloads once (about 182 MiB / 190 MB); transcription takes longer on the phone.
+- Fixed overlapping highlights when words have very close or identical timestamps. Common English terms written in Hindi use their English spelling.
+- Added regression coverage for mixed Hindi/English, punctuation, Hindi digits, and subtitle timing. Speech recognition can still mishear individual words; review captions before sharing.
+
+## MasterClip for Android 1.2.1
+
+- Captions now decode AAC audio that starts with a negative priming timestamp instead of treating it as an empty file.
+- When a selected clip has no subtitle words, the app uses speech recognition even if subtitles exist elsewhere in the video.
+- Words spoken across the start of a clip remain visible and are trimmed to the clip boundary.
+- Website APK updates retain the existing signing certificate so current installations can update in place. This test-signed build is for website delivery; Google Play production signing is separate.
+
 ## MasterClip for Android 1.1.0
 
 Turn any YouTube or Twitch video into vertical Shorts, Reels and TikToks, right on your phone. Install it over 1.0.0: your settings stay.

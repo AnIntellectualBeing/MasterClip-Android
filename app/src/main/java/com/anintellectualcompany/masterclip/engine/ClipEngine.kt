@@ -271,9 +271,10 @@ object ClipEngine {
             val plan = LayoutPlanner.plan(size.width, size.height, scan.faces, req.layout, scan.edges)
             lap("clip $n ready to render: ${size.width}x${size.height}, faces ${scan.faces.count { it.faces.isNotEmpty() }}/${scan.faces.size} -> ${plan.mode}, panel=${scan.edges != null}")
             val words = wordsJob.await()
-            val chunks = if (words.isEmpty()) speechChunks(context, req, partUri, fromMs, toMs, n) else Captions.chunks(
-                Captions.slice(words, (m.start * 1000).toLong(), (m.start * 1000).toLong() + (toMs - fromMs))
-            )
+            val chunks = Captions.forClip(words, (m.start * 1000).toLong(),
+                (m.start * 1000).toLong() + (toMs - fromMs)) {
+                speechChunks(context, req, partUri, fromMs, toMs, n)
+            }
             Prepared(partUri, fromMs, toMs, plan, chunks, m.start, m.start + (to - from), part.file)
         }
     }

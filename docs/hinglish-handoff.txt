@@ -1,0 +1,91 @@
+MasterClip Android caption handoff - 2026-11-27
+
+Current source: version 1.2.2, versionCode 26112702.
+This handoff contains source and reproduction inputs. APKs and speech models stay out of GitHub.
+
+Implemented
+- Fix AAC decoding when its first sample has a negative priming timestamp.
+- Fall back to on-phone speech when the selected clip has no subtitle words.
+- Keep words crossing a clip's starting boundary.
+- Convert Hindi script to Roman Hinglish for downloaded subtitles and speech output.
+- Replace Whisper tiny with multilingual small-q5_1 and beam search (5 candidates).
+- Remove the old unrelated Roman Hindi example prompt and second decoding pass.
+- Merge identical word timestamps and prevent adjacent highlight times overlapping.
+- Normalize common Hindi-script English terms such as game and ready.
+
+Remaining issue: transcription accuracy
+The translation-to-English failure was resolved for the synthetic Hindi examples below,
+but individual words are still misrecognised. Do not interpret passing word-presence
+checks as a full accuracy benchmark or verification against natural human speech.
+
+Male sample output:
+namaste duston, aaj hum vitiyo editing sikhenge yeh vitiyo bahut accha hai, daee kapshin sahi hai,
+Examples: bhai became daee; captions became kapshin; video became vitiyo.
+
+Female sample output:
+bhai aajka game bahut accha hai tum ready ho pahle is khlip ko sep karo phil hum aagla roon khelenge
+Examples: clip became khlip; save became sep; round became roon.
+
+English regression output:
+Welcome to MasterClip. These captions should follow every word. We are testing speech
+recognition on this phone. The final video should show clear captions.
+
+Recommended next investigation
+- Measure recognition errors against real human Hinglish recordings and varied background noise.
+- Compare model/decoder alternatives with accuracy, memory, battery use and runtime measured.
+- Avoid replacing a misheard word using a table fitted only to these fixtures.
+- Subtitle text may already contain recognition errors; Romanisation cannot recover missing words.
+- Current model download validates minimum file size rather than checksum; consider stronger integrity verification.
+
+Validation performed
+- 83 Android unit tests passed.
+- Two synthetic Hinglish voices and one English fixture completed decoding, recognition and video export
+  on a Xiaomi M2101K6P using the debug build of the production speech and renderer code.
+- An exported frame showed TUM READY HO, with READY highlighted.
+- Signed, minified release APKs built for arm64-v8a, armeabi-v7a and x86_64.
+- The arm64 release APK installed and launched on the phone. Export tests used the debug build.
+- Website download was not updated during the Hinglish changes.
+
+Model and signing
+- Default: ggml-small-q5_1.bin, 190085487 bytes (about 182 MiB / 190 MB), downloaded once.
+- Recognition is slower than the previous 31 MB tiny model. Do not assume real-time speed.
+- Existing website build uses the prior test signing certificate, not Google Play production signing.
+- Do not commit signing keys, passwords, local.properties, model files or generated APKs.
+
+Reproduce
+1. Install JDK 17+, Android SDK and NDK as described in README.md, plus ffmpeg for fixtures.
+2. Run gradlew.bat :app:testDebugUnitTest.
+3. Run gradlew.bat :app:assembleDebug :app:assembleDebugAndroidTest.
+   To rebuild the native decoder explicitly, add :app:externalNativeBuildDebug.
+4. Resolve the actual APK location from the generated APK listing metadata.
+   With android.injected.build.abi, Gradle can write app/build/intermediates/apk/...
+   instead of app/build/outputs/apk/...; stale APKs may remain in the other folder.
+   Check versionName/versionCode and timestamps before installing.
+5. Use adb -s SERIAL install -r -t PATH for both the arm64 debug app and androidTest APK.
+   Preserve app data; no uninstall or pm clear is necessary.
+6. Create English video: powershell -ExecutionPolicy Bypass -File tools/make-caption-fixture.ps1.
+7. For synthetic Hindi fixtures, optionally install Python edge-tts and generate audio:
+   python -m edge_tts --voice hi-IN-MadhurNeural --file tools/fixtures/hinglish-male.txt --write-media build/hinglish-input.mp3
+   python -m edge_tts --voice hi-IN-SwaraNeural --file tools/fixtures/hinglish-female.txt --write-media build/hinglish-second-input.mp3
+   This TTS tool uses Microsoft's online service; fixtures contain only supplied synthetic text.
+8. Make each audio file into a 12-second video, substituting INPUT and OUTPUT paths:
+   ffmpeg -y -f lavfi -i color=c=0x15304a:s=640x360:r=30:d=12 -i INPUT.mp3 -t 12 -c:v libx264 -pix_fmt yuv420p -c:a aac OUTPUT.mp4
+9. Push each video into /sdcard/Android/data/com.anintellectualcompany.masterclip/files/.
+10. Run the production speech path through instrumentation:
+   adb -s SERIAL shell am instrument -w -e input /sdcard/Android/data/com.anintellectualcompany.masterclip/files/hinglish-second-input.mp4 -e expected bhai,aaj,bahut,accha,tum,ho,hum,khelenge com.anintellectualcompany.masterclip.test/com.anintellectualcompany.masterclip.engine.CaptionSmokeRunner
+   For the male fixture, use expected namaste,aaj,hum,editing,bahut,accha,sahi.
+   For the English fixture, omit expected (defaults to captions).
+   These checks intentionally test Hindi retention and export, not perfect transcript matching.
+11. A pass returns INSTRUMENTATION_CODE: -1 plus PASS and an output filename.
+    adb itself can exit 0 for a failed test; inspect the instrumentation result.
+    Pull caption-smoke-output.mp4 after each run because the next run overwrites it.
+12. Runner options language, model and prompt are diagnostic overrides. Omit them to test
+    the actual production Speech.transcribe path. They bypass that path when language is set.
+
+Source map
+- Speech.kt: download, PCM decoding, recognition, timed-word normalization.
+- whisper_jni.cpp: native decoder parameters and word timestamp export.
+- Hinglish.kt: Hindi-to-Roman conversion rules and common spelling dictionary.
+- Captions.kt / ClipEngine.kt: subtitle selection, clip slicing and speech fallback.
+- SpeechTest.kt / EngineTest.kt: caption regression tests.
+- CaptionSmokeRunner.kt: on-device decoder, recognizer and renderer check.
